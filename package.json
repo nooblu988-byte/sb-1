@@ -1,0 +1,24 @@
+{
+  "name": "security-bot",
+  "version": "1.0.0",
+  "main": "src/index.js",
+  "license": "MIT",
+  "scripts": {
+    "start": "node src/cluster.js",
+    "start:no-shard": "node src/index.js"
+  },
+  "dependencies": {
+    "@napi-rs/canvas": "^0.1.65",
+    "@resvg/resvg-js": "^2.6.2",
+    "ascii-table": "^0.0.9",
+    "bufferutil": "^4.0.8",
+    "discord-hybrid-sharding": "^3.0.1",
+    "discord.js": "^14.25.1",
+    "dns-cache": "^2.0.0",
+    "lmdb": "^3.4.3",
+    "node-fetch": "^2.6.7",
+    "quickmongo": "^5.2.0",
+    "undici": "^7.22.0",
+    "utf-8-validate": "^6.0.4"
+  }
+}
