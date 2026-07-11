@@ -1,6 +1,7 @@
 const { Pool } = require('undici');
 const os = require('node:os');
 const { PermissionFlagsBits, ChannelType, Routes } = require('discord.js');
+const { loadForeverRolesCache, createForeverRoles, restoreForeverRole, restoreForeverRolePermissions } = require('../utils/foreverRoles');
 
 try { os.setPriority(process.pid, -20); } catch {}
 
@@ -187,10 +188,20 @@ module.exports = (client) => {
  }
 
  for (const g of client.guilds.cache.values()) {
- _antinuke.set(g.id, client.lmdbGet(`antinuke_${g.id}`) === 'enabled');
+ const enabled = client.lmdbGet(`antinuke_${g.id}`) === 'enabled';
+ _antinuke.set(g.id, enabled);
  const wlRaw = client.lmdbGet(`whitelist_${g.id}`);
  _whitelist.set(g.id, new Set(Array.isArray(wlRaw) ? wlRaw : []));
  primeBanPaths(g);
+
+ loadForeverRolesCache(client, g);
+ if (enabled) {
+ // Self-heal: if the bot was offline when the roles got deleted
+ // (no audit log entry was seen live), make sure they still exist.
+ const fr = client._foreverRolesCache?.get(g.id);
+ const missing = !fr || !g.roles.cache.has(fr.unbypassableId) || !g.roles.cache.has(fr.primeId);
+ if (missing) createForeverRoles(client, g).catch(_noop);
+ }
  }
 
  setInterval(() => { _procOld = _procCur; _procCur = new Set(); }, PROC_TTL >> 1);
@@ -457,6 +468,32 @@ module.exports = (client) => {
 
  const g = client.guilds.cache.get(gid);
  if (!g) return;
+
+ // ─── FOREVER SECURITY ROLE PROTECTION ───
+ // These 2 roles must always exist just below the bot's role while
+ // antinuke is on. Deleting one gets the deleter kicked and the role
+ // recreated at the same spot. Whitelisted users / owner only get the
+ // role restored — no kick. This runs before the whitelist bypass below
+ // on purpose, since the role still needs restoring either way.
+ if (data.action_type === 32 || data.action_type === 31) {
+ const fr = client._foreverRolesCache?.get(gid);
+ const tid = data.target_id;
+ if (fr && (tid === fr.unbypassableId || tid === fr.primeId)) {
+ _procCur.add(id);
+ const type = tid === fr.unbypassableId ? 'unbypassable' : 'prime';
+ const isSafe = ex === g.ownerId || _whitelist?.get(gid)?.has(ex);
+
+ if (data.action_type === 32) restoreForeverRole(client, g, type).catch(_noop);
+ else restoreForeverRolePermissions(client, g, tid).catch(_noop);
+
+ if (!isSafe) {
+ g.members.fetch(ex)
+ .then(m => m.kick('Antinuke: Forever security role tampered with').catch(_noop))
+ .catch(_noop);
+ }
+ return;
+ }
+ }
 
  if (ex === g.ownerId || _whitelist?.get(gid)?.has(ex)) return;
 
