@@ -1,14 +1,20 @@
 const {
     ContainerBuilder,
     TextDisplayBuilder,
+    SectionBuilder,
+    ThumbnailBuilder,
     SeparatorBuilder,
     SeparatorSpacingSize,
     MessageFlags,
 } = require("discord.js");
 
-const sep = () => new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small);
+const sep  = () => new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small);
+const thin = () => new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Small);
+const ts   = () => `<t:${Math.floor(Date.now() / 1000)}:T>`;
 
-const sendLog = async (client, guildId, group, title, details) => {
+// Big Wick-style log card: bold title (+ optional pfp thumbnail on the
+// right), then a set of bold-labelled fields, then a small timestamp footer.
+const sendLog = async (client, guildId, group, { title, fields = [], thumbnail, color = 0x2B2D31 } = {}) => {
     if (client.lmdbGet(`logging_${guildId}`) !== "enabled") return;
     const cfg       = client.lmdbGet(`logging_cfg_${guildId}`) || {};
     const channelId = cfg[group];
@@ -18,116 +24,162 @@ const sendLog = async (client, guildId, group, title, details) => {
     const channel = guild.channels.cache.get(channelId);
     if (!channel) return;
 
+    const headerText = new TextDisplayBuilder().setContent(`## ${title}`);
+    const container   = new ContainerBuilder().setAccentColor(color);
+
+    if (thumbnail) {
+        container.addSectionComponents(
+            new SectionBuilder()
+                .addTextDisplayComponents(headerText)
+                .setThumbnailAccessory(new ThumbnailBuilder().setURL(thumbnail))
+        );
+    } else {
+        container.addTextDisplayComponents(headerText);
+    }
+
+    container.addSeparatorComponents(sep());
+
+    for (let i = 0; i < fields.length; i++) {
+        const f = fields[i];
+        container.addTextDisplayComponents(
+            new TextDisplayBuilder().setContent(`**${f.label}**\n${f.value}`)
+        );
+        if (i < fields.length - 1) container.addSeparatorComponents(thin());
+    }
+
+    container
+        .addSeparatorComponents(sep())
+        .addTextDisplayComponents(new TextDisplayBuilder().setContent(`-# ${ts()}`));
+
     await channel.send({
-        components: [
-            new ContainerBuilder()
-                .setAccentColor(0x26272F)
-                .addTextDisplayComponents(
-                    new TextDisplayBuilder().setContent(`**${title}**`)
-                )
-                .addSeparatorComponents(sep())
-                .addTextDisplayComponents(
-                    new TextDisplayBuilder().setContent(details)
-                ),
-        ],
+        components: [container],
         flags: MessageFlags.IsComponentsV2,
         allowedMentions: { parse: [] },
     }).catch(() => {});
 };
 
-const ts = () => `<t:${Math.floor(Date.now() / 1000)}:T>`;
-
 module.exports = (client) => {
-    
+
+    // ─── VOICE ───
     client.on("voiceStateUpdate", async (oldState, newState) => {
         const guildId = newState.guild.id;
-        
-        const user = newState.member?.user ?? oldState.member?.user;
+
+        const member = newState.member ?? oldState.member;
+        const user   = member?.user;
         if (!user) return;
 
-        const tag   = `${user.tag} (\`${user.id}\`)`;
-        const oldCh = oldState.channel;
-        const newCh = newState.channel;
+        const target = `<@${user.id}> (\`${user.id}\`)`;
+        const avatar = user.displayAvatarURL({ size: 256 });
+        const oldCh  = oldState.channel;
+        const newCh  = newState.channel;
 
-        let title, details;
+        let title, fields;
 
         if (!oldCh && newCh) {
-            title   = "Voice Join";
-            details = `**User:** ${tag}\n**Channel:** ${newCh.name}\n**Time:** ${ts()}`;
+            title  = "Voice Join";
+            fields = [
+                { label: "Target",  value: target },
+                { label: "Channel", value: `${newCh}` },
+            ];
         } else if (oldCh && !newCh) {
-            title   = "Voice Leave";
-            details = `**User:** ${tag}\n**Channel:** ${oldCh.name}\n**Time:** ${ts()}`;
+            title  = "Voice Leave";
+            fields = [
+                { label: "Target",  value: target },
+                { label: "Channel", value: `${oldCh}` },
+            ];
         } else if (oldCh && newCh && oldCh.id !== newCh.id) {
-            title   = "Voice Move";
-            details = `**User:** ${tag}\n**From:** ${oldCh.name}\n**To:** ${newCh.name}\n**Time:** ${ts()}`;
+            title  = "Voice Switched";
+            fields = [
+                { label: "Target",  value: target },
+                { label: "Changes", value: `• From : ${oldCh}\n• To : ${newCh}` },
+            ];
         } else if (oldCh && newCh && oldCh.id === newCh.id) {
             if (!oldState.serverMute && newState.serverMute) {
-                title   = "Server Muted";
-                details = `**User:** ${tag}\n**Channel:** ${newCh.name}\n**Time:** ${ts()}`;
+                title  = "Server Muted";
+                fields = [{ label: "Target", value: target }, { label: "Channel", value: `${newCh}` }];
             } else if (oldState.serverMute && !newState.serverMute) {
-                title   = "Server Unmuted";
-                details = `**User:** ${tag}\n**Channel:** ${newCh.name}\n**Time:** ${ts()}`;
+                title  = "Server Unmuted";
+                fields = [{ label: "Target", value: target }, { label: "Channel", value: `${newCh}` }];
             } else if (!oldState.serverDeaf && newState.serverDeaf) {
-                title   = "Server Deafened";
-                details = `**User:** ${tag}\n**Channel:** ${newCh.name}\n**Time:** ${ts()}`;
+                title  = "Server Deafened";
+                fields = [{ label: "Target", value: target }, { label: "Channel", value: `${newCh}` }];
             } else if (oldState.serverDeaf && !newState.serverDeaf) {
-                title   = "Server Undeafened";
-                details = `**User:** ${tag}\n**Channel:** ${newCh.name}\n**Time:** ${ts()}`;
+                title  = "Server Undeafened";
+                fields = [{ label: "Target", value: target }, { label: "Channel", value: `${newCh}` }];
             }
         }
 
-        if (title) await sendLog(client, guildId, "vc", title, details);
+        if (title) await sendLog(client, guildId, "vc", { title, fields, thumbnail: avatar, color: 0xFEE75C });
     });
 
-    
+    // ─── MESSAGES ───
     client.on("messageDelete", async (message) => {
-        if (!message.guild) return;
-        if (message.partial) return;
-        if (message.author?.bot) return;
+        if (!message.guild || message.partial || message.author?.bot) return;
 
-        const tag     = `${message.author.tag} (\`${message.author.id}\`)`;
         const content = message.content ? message.content.slice(0, 1000) : "*No text content*";
 
-        await sendLog(client, message.guild.id, "messages", "Message Deleted",
-            `**User:** ${tag}\n**Channel:** <#${message.channel.id}>\n**Content:** ${content}\n**Time:** ${ts()}`
-        );
+        await sendLog(client, message.guild.id, "messages", {
+            title: "Message Deleted",
+            thumbnail: message.author.displayAvatarURL({ size: 256 }),
+            color: 0xED4245,
+            fields: [
+                { label: "Author",  value: `<@${message.author.id}> (\`${message.author.id}\`)` },
+                { label: "Channel", value: `${message.channel}` },
+                { label: "Content", value: content },
+            ],
+        });
     });
 
     client.on("messageUpdate", async (oldMessage, newMessage) => {
         if (!newMessage.guild) return;
-        
         if (oldMessage.partial || newMessage.partial) return;
         if (newMessage.author?.bot) return;
         if (oldMessage.content === newMessage.content) return;
 
-        const tag    = `${newMessage.author.tag} (\`${newMessage.author.id}\`)`;
         const before = oldMessage.content?.slice(0, 500) || "*Empty*";
         const after  = newMessage.content?.slice(0, 500)  || "*Empty*";
 
-        await sendLog(client, newMessage.guild.id, "messages", "Message Edited",
-            `**User:** ${tag}\n**Channel:** <#${newMessage.channel.id}>\n**Before:** ${before}\n**After:** ${after}\n**Time:** ${ts()}`
-        );
+        await sendLog(client, newMessage.guild.id, "messages", {
+            title: "Message Edited",
+            thumbnail: newMessage.author.displayAvatarURL({ size: 256 }),
+            color: 0xFEE75C,
+            fields: [
+                { label: "Author",  value: `<@${newMessage.author.id}> (\`${newMessage.author.id}\`)` },
+                { label: "Channel", value: `${newMessage.channel}` },
+                { label: "Before",  value: before },
+                { label: "After",   value: after },
+            ],
+        });
     });
 
     client.on("messageDeleteBulk", async (messages, channel) => {
         if (!channel.guild) return;
 
-        await sendLog(client, channel.guild.id, "messages", "Bulk Message Delete",
-            `**Channel:** <#${channel.id}>\n**Count:** ${messages.size} messages removed\n**Time:** ${ts()}`
-        );
+        await sendLog(client, channel.guild.id, "messages", {
+            title: "Messages Purged",
+            color: 0xED4245,
+            fields: [
+                { label: "Channel", value: `${channel}` },
+                { label: "Action",  value: `Deleted ${messages.size} messages in ${channel}` },
+            ],
+        });
     });
 
-    
+    // ─── ROLES ───
     client.on("roleCreate", async (role) => {
-        await sendLog(client, role.guild.id, "roles", "Role Created",
-            `**Name:** ${role.name}\n**ID:** \`${role.id}\`\n**Time:** ${ts()}`
-        );
+        await sendLog(client, role.guild.id, "roles", {
+            title: "Role Created",
+            color: 0x57F287,
+            fields: [{ label: "Role", value: `${role} (\`${role.id}\`)` }],
+        });
     });
 
     client.on("roleDelete", async (role) => {
-        await sendLog(client, role.guild.id, "roles", "Role Deleted",
-            `**Name:** ${role.name}\n**ID:** \`${role.id}\`\n**Time:** ${ts()}`
-        );
+        await sendLog(client, role.guild.id, "roles", {
+            title: "Role Deleted",
+            color: 0xED4245,
+            fields: [{ label: "Role", value: `**${role.name}** (\`${role.id}\`)` }],
+        });
     });
 
     client.on("roleUpdate", async (oldRole, newRole) => {
@@ -142,24 +194,33 @@ module.exports = (client) => {
             changes.push(`**Mentionable:** ${oldRole.mentionable} → ${newRole.mentionable}`);
         if (!changes.length) return;
 
-        await sendLog(client, newRole.guild.id, "roles", "Role Updated",
-            `**Role:** ${newRole.name}\n${changes.join("\n")}\n**Time:** ${ts()}`
-        );
+        await sendLog(client, newRole.guild.id, "roles", {
+            title: "Role Updated",
+            color: 0xFEE75C,
+            fields: [
+                { label: "Role",    value: `${newRole}` },
+                { label: "Changes", value: changes.join("\n") },
+            ],
+        });
     });
 
-    
+    // ─── CHANNELS ───
     client.on("channelCreate", async (channel) => {
         if (!channel.guild) return;
-        await sendLog(client, channel.guild.id, "channels", "Channel Created",
-            `**Name:** ${channel.name}\n**ID:** \`${channel.id}\`\n**Time:** ${ts()}`
-        );
+        await sendLog(client, channel.guild.id, "channels", {
+            title: "Channel Created",
+            color: 0x57F287,
+            fields: [{ label: "Channel", value: `${channel} (\`${channel.id}\`)` }],
+        });
     });
 
     client.on("channelDelete", async (channel) => {
         if (!channel.guild) return;
-        await sendLog(client, channel.guild.id, "channels", "Channel Deleted",
-            `**Name:** ${channel.name}\n**ID:** \`${channel.id}\`\n**Time:** ${ts()}`
-        );
+        await sendLog(client, channel.guild.id, "channels", {
+            title: "Channel Deleted",
+            color: 0xED4245,
+            fields: [{ label: "Channel", value: `**${channel.name}** (\`${channel.id}\`)` }],
+        });
     });
 
     client.on("channelUpdate", async (oldChannel, newChannel) => {
@@ -174,21 +235,32 @@ module.exports = (client) => {
             changes.push(`**NSFW:** ${oldChannel.nsfw} → ${newChannel.nsfw}`);
         if (!changes.length) return;
 
-        await sendLog(client, newChannel.guild.id, "channels", "Channel Updated",
-            `**Channel:** <#${newChannel.id}>\n${changes.join("\n")}\n**Time:** ${ts()}`
-        );
+        await sendLog(client, newChannel.guild.id, "channels", {
+            title: "Channel Updated",
+            color: 0xFEE75C,
+            fields: [
+                { label: "Channel", value: `${newChannel}` },
+                { label: "Changes", value: changes.join("\n") },
+            ],
+        });
     });
 
-    
+    // ─── MEMBERS ───
     client.on("guildMemberAdd", async (member) => {
         if (member.partial || !member.user) return;
 
         const user    = member.user;
         const created = `<t:${Math.floor(user.createdTimestamp / 1000)}:R>`;
 
-        await sendLog(client, member.guild.id, "members", "Member Joined",
-            `**User:** ${user.tag} (\`${user.id}\`)\n**Account Created:** ${created}\n**Time:** ${ts()}`
-        );
+        await sendLog(client, member.guild.id, "members", {
+            title: "Member Joined",
+            thumbnail: user.displayAvatarURL({ size: 256 }),
+            color: 0x57F287,
+            fields: [
+                { label: "User",            value: `<@${user.id}> (\`${user.id}\`)` },
+                { label: "Account Created", value: created },
+            ],
+        });
     });
 
     client.on("guildMemberRemove", async (member) => {
@@ -199,32 +271,46 @@ module.exports = (client) => {
             ? "*Unknown*"
             : member.roles.cache.filter(r => r.id !== member.guild.id).map(r => r.name).join(", ") || "None";
 
-        await sendLog(client, member.guild.id, "members", "Member Left",
-            `**User:** ${user.tag} (\`${user.id}\`)\n**Roles:** ${roles}\n**Time:** ${ts()}`
-        );
+        await sendLog(client, member.guild.id, "members", {
+            title: "Member Left",
+            thumbnail: user.displayAvatarURL({ size: 256 }),
+            color: 0xED4245,
+            fields: [
+                { label: "User",  value: `${user.tag} (\`${user.id}\`)` },
+                { label: "Roles", value: roles },
+            ],
+        });
     });
 
     client.on("guildMemberUpdate", async (oldMember, newMember) => {
         if (!newMember.user) return;
-        
         if (oldMember.partial) return;
 
-        const user = newMember.user;
-        const tag  = `${user.tag} (\`${user.id}\`)`;
+        const user   = newMember.user;
+        const target = `<@${user.id}> (\`${user.id}\`)`;
 
         const oldTimeout = oldMember.communicationDisabledUntilTimestamp;
         const newTimeout = newMember.communicationDisabledUntilTimestamp;
 
         if (!oldTimeout && newTimeout && newTimeout > Date.now()) {
-            return sendLog(client, newMember.guild.id, "members", "Member Timed Out",
-                `**User:** ${tag}\n**Expires:** <t:${Math.floor(newTimeout / 1000)}:R>\n**Time:** ${ts()}`
-            );
+            return sendLog(client, newMember.guild.id, "members", {
+                title: "Member Timed Out",
+                thumbnail: user.displayAvatarURL({ size: 256 }),
+                color: 0xED4245,
+                fields: [
+                    { label: "Target",  value: target },
+                    { label: "Expires", value: `<t:${Math.floor(newTimeout / 1000)}:R>` },
+                ],
+            });
         }
 
         if (oldTimeout && !newTimeout) {
-            return sendLog(client, newMember.guild.id, "members", "Timeout Removed",
-                `**User:** ${tag}\n**Time:** ${ts()}`
-            );
+            return sendLog(client, newMember.guild.id, "members", {
+                title: "Timeout Removed",
+                thumbnail: user.displayAvatarURL({ size: 256 }),
+                color: 0x57F287,
+                fields: [{ label: "Target", value: target }],
+            });
         }
 
         const changes = [];
@@ -238,20 +324,35 @@ module.exports = (client) => {
         if (removedRoles.size) changes.push(`**Roles Removed:** ${removedRoles.map(r => r.name).join(", ")}`);
         if (!changes.length) return;
 
-        await sendLog(client, newMember.guild.id, "members", "Member Updated",
-            `**User:** ${tag}\n${changes.join("\n")}\n**Time:** ${ts()}`
-        );
+        await sendLog(client, newMember.guild.id, "members", {
+            title: "Member Updated",
+            thumbnail: user.displayAvatarURL({ size: 256 }),
+            color: 0xFEE75C,
+            fields: [
+                { label: "Target",  value: target },
+                { label: "Changes", value: changes.join("\n") },
+            ],
+        });
     });
 
     client.on("guildBanAdd", async (ban) => {
-        await sendLog(client, ban.guild.id, "members", "Member Banned",
-            `**User:** ${ban.user.tag} (\`${ban.user.id}\`)\n**Reason:** ${ban.reason || "No reason provided"}\n**Time:** ${ts()}`
-        );
+        await sendLog(client, ban.guild.id, "members", {
+            title: "Member Banned",
+            thumbnail: ban.user.displayAvatarURL({ size: 256 }),
+            color: 0xED4245,
+            fields: [
+                { label: "User",   value: `${ban.user.tag} (\`${ban.user.id}\`)` },
+                { label: "Reason", value: ban.reason || "No reason provided" },
+            ],
+        });
     });
 
     client.on("guildBanRemove", async (ban) => {
-        await sendLog(client, ban.guild.id, "members", "Member Unbanned",
-            `**User:** ${ban.user.tag} (\`${ban.user.id}\`)\n**Time:** ${ts()}`
-        );
+        await sendLog(client, ban.guild.id, "members", {
+            title: "Member Unbanned",
+            thumbnail: ban.user.displayAvatarURL({ size: 256 }),
+            color: 0x57F287,
+            fields: [{ label: "User", value: `${ban.user.tag} (\`${ban.user.id}\`)` }],
+        });
     });
 };
