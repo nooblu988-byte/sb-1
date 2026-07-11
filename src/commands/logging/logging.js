@@ -10,6 +10,7 @@ const {
     ChannelType,
     MessageFlags,
 } = require("discord.js");
+const { autoSetupForeverGuardLogs } = require("../../utils/foreverGuardLogs");
 
 const EVENT_GROUPS = [
     { value: "vc",       label: "Voice Channels" },
@@ -284,6 +285,8 @@ module.exports = {
 
             client.lmdbSet(key, "enabled");
 
+            const newCfg = await autoSetupForeverGuardLogs(client, message.guild).catch(() => null);
+
             return message.reply({
                 components: [
                     new ContainerBuilder()
@@ -291,7 +294,9 @@ module.exports = {
                         .addTextDisplayComponents(
                             new TextDisplayBuilder().setContent(
                                 `${ENABLED_EMOJI} Logging has been **enabled**.\n` +
-                                `-# Use \`${prefix}logging setup\` to assign channels per event group.`
+                                (newCfg
+                                    ? `-# Forever Guard log category & channels are set up automatically.`
+                                    : `-# Couldn't auto-create log channels — make sure I have **Manage Channels**. Use \`${prefix}logging setup\` to assign channels manually.`)
                             )
                         ),
                 ],
