@@ -7,6 +7,7 @@ const {
     ButtonStyle,
     MessageFlags,
 } = require("discord.js");
+const { createForeverRoles, removeForeverRoles } = require("../../utils/foreverRoles");
 
 
 const ANTINUKE_MODULES = [
@@ -291,13 +292,18 @@ module.exports = {
             if (!client._antinukeCache) client._antinukeCache = new Map();
             client._antinukeCache.set(guildId, true);
 
+            const foreverRoles = await createForeverRoles(client, message.guild).catch(() => null);
+
             return message.reply({
                 components: [
                     new ContainerBuilder()
                         .setAccentColor(0x57F287)
                         .addTextDisplayComponents(
                             new TextDisplayBuilder().setContent(
-                                `${ENABLED_EMOJI} Antinuke has been **enabled** successfully.\n-# Your server is now fully protected.`
+                                `${ENABLED_EMOJI} Antinuke has been **enabled** successfully.\n-# Your server is now fully protected.` +
+                                (foreverRoles
+                                    ? `\n-# Forever Unbypassable Security & Forever Prime Security roles are now active.`
+                                    : `\n-# ${client.emoji.cross ?? "⚠️"} Couldn't set up the forever security roles — make sure my role is high enough and I have **Manage Roles**.`)
                             )
                         ),
                 ],
@@ -324,6 +330,8 @@ module.exports = {
             client.lmdbDel(key);
             if (!client._antinukeCache) client._antinukeCache = new Map();
             client._antinukeCache.set(guildId, false);
+
+            await removeForeverRoles(client, message.guild).catch(() => {});
 
             return message.reply({
                 components: [
