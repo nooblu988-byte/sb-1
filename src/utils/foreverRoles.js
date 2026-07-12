@@ -26,6 +26,17 @@ const _noop = () => {};
 
 const dbKey = (gid) => `foreverRoles_${gid}`;
 
+// The bot's OWN role — the managed/integration role Discord auto-creates
+// when the bot joins — not just "whatever role the bot currently has that
+// happens to be highest". If someone manually assigns the bot an extra
+// role and drags it above its native role, `member.roles.highest` would
+// pick that instead; this always tracks the bot's real role specifically.
+function getBotOwnRole(guild, client) {
+ return guild.roles.cache.find(
+ r => r.managed && r.tags?.botId === client.user.id
+ ) || null;
+}
+
 // Forces `rolesToInsert` (in the given order) to sit immediately below
 // `anchorRole` in the guild's role hierarchy, in one atomic reorder call.
 // This re-derives the ENTIRE segment from the bot's role downward off a
@@ -43,6 +54,12 @@ async function placeRolesUnderAnchor(guild, botRole, anchorRole, rolesToInsert) 
  const botIndex = nonEveryone.findIndex(r => r.id === botRole.id);
  if (botIndex === -1) return; // bot's own role vanished somehow — bail safely
 
+ // Use the bot role's FRESH position from this fetch, not the (possibly
+ // stale) cached one passed in — a stale base position is what was
+ // causing other roles to end up wedged between the bot's role and the
+ // forever roles.
+ const freshBotRole = nonEveryone[botIndex];
+
  // The bot can only ever reorder roles from its own role downward — this
  // slice is the entire legal range, top-anchored on the bot's role.
  const segment = nonEveryone.slice(botIndex);
@@ -54,7 +71,7 @@ async function placeRolesUnderAnchor(guild, botRole, anchorRole, rolesToInsert) 
 
  segment.splice(insertAt, 0, ...rolesToInsert);
 
- const basePosition = botRole.position;
+ const basePosition = freshBotRole.position;
  const payload = segment.map((r, i) => ({ role: r.id, position: Math.max(basePosition - i, 1) }));
 
  await guild.roles.setPositions(payload).catch(_noop);
@@ -91,7 +108,7 @@ async function createForeverRoles(client, guild) {
  const me = guild.members.me ?? await guild.members.fetchMe().catch(() => null);
  if (!me) return null;
 
- const botRole = me.roles.highest;
+ const botRole = getBotOwnRole(guild, client) ?? me.roles.highest;
  if (!botRole || botRole.id === guild.id) return null; // bot has no assignable role to anchor below
 
  const existing = client.lmdbGet(dbKey(guild.id)) || {};
@@ -156,7 +173,7 @@ async function removeForeverRoles(client, guild) {
 async function restoreForeverRole(client, guild, type) {
  const me = guild.members.me;
  if (!me) return null;
- const botRole = me.roles.highest;
+ const botRole = getBotOwnRole(guild, client) ?? me.roles.highest;
  if (!botRole || botRole.id === guild.id) return null;
 
  const cache = _cacheFor(client).get(guild.id) || client.lmdbGet(dbKey(guild.id)) || {};
