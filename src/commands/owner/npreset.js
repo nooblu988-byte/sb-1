@@ -68,7 +68,7 @@ module.exports = {
             }
 
             if (interaction.customId === "npreset_confirm") {
-                await client.db.set("noprefix", []);
+                client.lmdbSet("noprefix", []);
                 collector.stop("confirmed");
                 return interaction.update({
                     components: [
