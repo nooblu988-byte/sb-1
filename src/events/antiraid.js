@@ -150,16 +150,20 @@ module.exports = (client) => {
                 const raiders = [...joins];
                 joinTracker.set(guildId, []);
 
+                // ─── ACT FIRST, ALERT AFTER ───
+                // Punish every raider at the same time (concurrently)
+                // instead of one-by-one — with a big raid, sequential
+                // kicks/bans could take several seconds. The alert is
+                // purely informational, so it's sent after the raiders
+                // are already handled instead of delaying them.
+                await Promise.all(raiders.map(({ id }) => executeAction(id, "AntiRaid: Mass join raid detected")));
+
                 await sendAlert("Raid Detected",
                     `**${raiders.length} users** joined within ${cfg.modules.massJoin.window}s\n` +
                     `**Threshold:** ${thresh} joins / ${cfg.modules.massJoin.window}s\n` +
                     `**Action:** ${actionLabel} all recent joiners\n` +
                     `**Time:** ${ts}`
                 );
-
-                for (const { id } of raiders) {
-                    await executeAction(id, "AntiRaid: Mass join raid detected");
-                }
             }
         }
     });
