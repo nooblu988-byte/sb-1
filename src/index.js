@@ -100,7 +100,6 @@ client.cools = new Collection();
 const config = require("./config.json");
 const mongoURL = process.env.MONGODB_URL || config.MONGO;
 client.db = new Database(mongoURL);
-client.db.connect();
 
 const lmdb = open({
  path: path.join(__dirname, "database", "lmdb"),
@@ -110,8 +109,41 @@ const lmdb = open({
 
 client.lmdb = lmdb;
 client.lmdbGet = (key) => lmdb.get(key);
-client.lmdbSet = (key, value) => lmdb.put(key, value);
-client.lmdbDel = (key) => lmdb.remove(key);
+
+// ═══════════════════════════════════════════════════════════════
+// 🔒 PERSISTENT SETTINGS — LMDB stays the fast local cache used
+// everywhere in the bot (unchanged), but every write is also mirrored
+// to MongoDB in the background. On host platforms like Render, local
+// disk is wiped on every redeploy/restart — without this, every saved
+// server setting (antinuke, whitelist, logging config, forever roles,
+// etc.) would silently reset to default each time the bot restarts.
+// MongoDB is remote and persists regardless of container restarts, so
+// on boot (see the startup IIFE below) everything gets restored from
+// MongoDB into LMDB before the bot logs in.
+// ═══════════════════════════════════════════════════════════════
+client.lmdbSet = (key, value) => {
+ lmdb.put(key, value);
+ client.db.set(key, value).catch(() => {});
+ return value;
+};
+client.lmdbDel = (key) => {
+ lmdb.remove(key);
+ client.db.delete(key).catch(() => {});
+};
+
+async function hydratePersistentSettings() {
+ try {
+ await client.db.connect();
+ const saved = await client.db.all();
+ for (const { ID, data } of saved) {
+ if (ID === undefined || data === undefined) continue;
+ lmdb.putSync(ID, data);
+ }
+ console.log(`${c.purple}${c.bright} Restored ${c.white}${saved.length}${c.purple} saved server setting(s) from MongoDB ${c.reset}`);
+ } catch (err) {
+ console.error(`${c.purple}${c.bright} Could not restore settings from MongoDB — starting with local cache only:${c.reset}`, err?.message || err);
+ }
+}
 
 // ═══════════════════════════════════════════════════════════════
 // 🔥 UPDATED WHITELIST FUNCTION — Checks config.json too!
@@ -181,6 +213,7 @@ client.once("clientReady", () => {
 const token = process.env.DISCORD_TOKEN || config.token;
 
 (async () => {
+ await hydratePersistentSettings();
  await syncEmojis(token);
  client.login(token);
 })();
