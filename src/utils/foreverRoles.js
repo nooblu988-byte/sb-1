@@ -26,6 +26,40 @@ const _noop = () => {};
 
 const dbKey = (gid) => `foreverRoles_${gid}`;
 
+// Forces `rolesToInsert` (in the given order) to sit immediately below
+// `anchorRole` in the guild's role hierarchy, in one atomic reorder call.
+// This re-derives the ENTIRE segment from the bot's role downward off a
+// freshly fetched role list every time, so stale positions / gaps / manual
+// drag-reordering can never leave the forever roles in the wrong slot.
+async function placeRolesUnderAnchor(guild, botRole, anchorRole, rolesToInsert) {
+ const fresh = await guild.roles.fetch().catch(() => null);
+ const roleMap = fresh ?? guild.roles.cache;
+
+ const insertIds = new Set(rolesToInsert.map(r => r.id));
+ const nonEveryone = [...roleMap.values()]
+ .filter(r => r.id !== guild.id && !insertIds.has(r.id))
+ .sort((a, b) => b.position - a.position); // top (highest) -> bottom
+
+ const botIndex = nonEveryone.findIndex(r => r.id === botRole.id);
+ if (botIndex === -1) return; // bot's own role vanished somehow — bail safely
+
+ // The bot can only ever reorder roles from its own role downward — this
+ // slice is the entire legal range, top-anchored on the bot's role.
+ const segment = nonEveryone.slice(botIndex);
+
+ const anchorIndex = anchorRole
+ ? segment.findIndex(r => r.id === anchorRole.id)
+ : 0;
+ const insertAt = anchorIndex === -1 ? 1 : anchorIndex + 1;
+
+ segment.splice(insertAt, 0, ...rolesToInsert);
+
+ const basePosition = botRole.position;
+ const payload = segment.map((r, i) => ({ role: r.id, position: Math.max(basePosition - i, 1) }));
+
+ await guild.roles.setPositions(payload).catch(_noop);
+}
+
 const _cacheFor = (client) => {
  if (!client._foreverRolesCache) client._foreverRolesCache = new Map();
  return client._foreverRolesCache;
@@ -88,14 +122,9 @@ async function createForeverRoles(client, guild) {
  }
  if (!primeRole) return null;
 
- // Move both roles into place in a single atomic reorder — right below
- // the bot's own role, unbypassable first then prime — instead of two
- // separate setPosition() calls, which can race against each other and
- // land the roles in the wrong slot.
- await guild.roles.setPositions([
- { role: unbypassableRole, position: Math.max(botRole.position - 1, 1) },
- { role: primeRole, position: Math.max(botRole.position - 2, 1) },
- ]).catch(_noop);
+ // Force both roles into the exact slot right below the bot's role — bot
+ // first, then unbypassable, then prime — in one atomic reorder.
+ await placeRolesUnderAnchor(guild, botRole, null, [unbypassableRole, primeRole]);
 
  // Bot wears both roles too, so they show up on the bot's own profile.
  // Re-fetch a fresh member object first — the role/position changes
@@ -134,12 +163,6 @@ async function restoreForeverRole(client, guild, type) {
  const siblingId = type === 'unbypassable' ? cache.primeId : cache.unbypassableId;
  const sibling = siblingId ? guild.roles.cache.get(siblingId) : null;
 
- const targetPosition = type === 'unbypassable'
- ? Math.max(botRole.position - 1, 1)
- : sibling
- ? Math.max(sibling.position - 1, 1)
- : Math.max(botRole.position - 2, 1);
-
  const role = await guild.roles.create({
  name: NAMES[type],
  color: COLORS[type],
@@ -150,7 +173,11 @@ async function restoreForeverRole(client, guild, type) {
  }).catch(() => null);
  if (!role) return null;
 
- await guild.roles.setPositions([{ role, position: targetPosition }]).catch(_noop);
+ // 'unbypassable' always anchors right under the bot's role. 'prime'
+ // anchors under its unbypassable sibling if that still exists,
+ // otherwise it falls back to anchoring under the bot's role too.
+ const anchor = type === 'unbypassable' ? null : (sibling ?? null);
+ await placeRolesUnderAnchor(guild, botRole, anchor, [role]);
 
  // Re-fetch a fresh member object before adding — same reasoning as
  // createForeverRoles, the reorder above can desync the cached member.
