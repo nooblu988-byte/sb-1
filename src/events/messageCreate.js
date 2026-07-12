@@ -97,7 +97,7 @@ module.exports = async (client) => {
     }
 
     let prefix = client.config.prefix;
-    const prefixData = await client.db.get(`prefix_${message.guild.id}`);
+    const prefixData = client.lmdbGet(`prefix_${message.guild.id}`);
     if (prefixData) prefix = prefixData;
 
     const mentionedBot =
@@ -127,7 +127,7 @@ module.exports = async (client) => {
       client.commands.get(commandWithoutPrefix) ||
       client.commands.find((c) => c.aliases?.includes(commandWithoutPrefix));
 
-    const npList = (await client.db.get("noprefix")) || [];
+    const npList = client.lmdbGet("noprefix") || [];
     const isNoprefixUser = npList.some((entry) => entry.userId === message.author.id);
 
     let cmd, args;
@@ -139,7 +139,7 @@ module.exports = async (client) => {
       args = argsWithPrefix;
     }
 
-    const bl = (await client.db.get(`blacklist_${client.user.id}`)) || [];
+    const bl = client.lmdbGet(`blacklist_${client.user.id}`) || [];
 
     if ((mentionedBot || cmd) && bl.includes(message.author.id)) {
       const now = Date.now();
@@ -147,7 +147,7 @@ module.exports = async (client) => {
       if (now - last < 60000) return;
       blacklistCooldown.set(message.author.id, now);
 
-      const reason = (await client.db.get(`blreason_${message.author.id}`)) || "No reason provided";
+      const reason = client.lmdbGet(`blreason_${message.author.id}`) || "No reason provided";
 
       return message.channel.send({
         components: [
