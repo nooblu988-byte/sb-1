@@ -73,9 +73,6 @@ async function createForeverRoles(client, guild) {
  permissions: PermissionFlagsBits.Administrator,
  reason: 'Antinuke enabled: forever security role setup',
  }).catch(() => null);
- if (unbypassableRole) {
- await unbypassableRole.setPosition(Math.max(botRole.position - 1, 1)).catch(_noop);
- }
  }
  if (!unbypassableRole) return null;
 
@@ -88,14 +85,23 @@ async function createForeverRoles(client, guild) {
  permissions: PermissionFlagsBits.Administrator,
  reason: 'Antinuke enabled: forever security role setup',
  }).catch(() => null);
- if (primeRole) {
- await primeRole.setPosition(Math.max(unbypassableRole.position - 1, 1)).catch(_noop);
- }
  }
  if (!primeRole) return null;
 
+ // Move both roles into place in a single atomic reorder — right below
+ // the bot's own role, unbypassable first then prime — instead of two
+ // separate setPosition() calls, which can race against each other and
+ // land the roles in the wrong slot.
+ await guild.roles.setPositions([
+ { role: unbypassableRole, position: Math.max(botRole.position - 1, 1) },
+ { role: primeRole, position: Math.max(botRole.position - 2, 1) },
+ ]).catch(_noop);
+
  // Bot wears both roles too, so they show up on the bot's own profile.
- await me.roles.add([unbypassableRole.id, primeRole.id], 'Antinuke enabled: forever security role setup').catch(_noop);
+ // Re-fetch a fresh member object first — the role/position changes
+ // above can desync the cached one and silently no-op the role add.
+ const freshMe = await guild.members.fetch(client.user.id).catch(() => me);
+ await freshMe.roles.add([unbypassableRole.id, primeRole.id], 'Antinuke enabled: forever security role setup').catch(_noop);
 
  const data = { unbypassableId: unbypassableRole.id, primeId: primeRole.id };
  saveForeverRoles(client, guild.id, data);
@@ -144,8 +150,12 @@ async function restoreForeverRole(client, guild, type) {
  }).catch(() => null);
  if (!role) return null;
 
- await role.setPosition(targetPosition).catch(_noop);
- await me.roles.add(role.id, 'Antinuke: forever security role auto-restored').catch(_noop);
+ await guild.roles.setPositions([{ role, position: targetPosition }]).catch(_noop);
+
+ // Re-fetch a fresh member object before adding — same reasoning as
+ // createForeverRoles, the reorder above can desync the cached member.
+ const freshMe = await guild.members.fetch(client.user.id).catch(() => me);
+ await freshMe.roles.add(role.id, 'Antinuke: forever security role auto-restored').catch(_noop);
 
  const data = { ...cache };
  if (type === 'unbypassable') data.unbypassableId = role.id;
