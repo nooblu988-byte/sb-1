@@ -39,7 +39,7 @@ module.exports = {
 
         // ─── LIST ───
         if (subCommand === 'list') {
-            const npList = await client.db.get("noprefix") || [];
+            const npList = client.lmdbGet("noprefix") || [];
             if (npList.length === 0) {
                 return message.channel.send(successContainer(`${client.emoji.info} | No users have no-prefix access.`));
             }
@@ -65,7 +65,7 @@ module.exports = {
             return message.channel.send(errorContainer(`${client.emoji.error} | Could not find that user.`));
         }
 
-        let npList = await client.db.get("noprefix") || [];
+        let npList = client.lmdbGet("noprefix") || [];
 
         if (subCommand === 'add') {
             // Check if already in list
@@ -74,7 +74,7 @@ module.exports = {
             }
 
             npList.push({ userId: targetUser.id, addedBy: message.author.id, addedAt: Date.now() });
-            await client.db.set("noprefix", npList);
+            client.lmdbSet("noprefix", npList);
 
             return message.channel.send(successContainer(
                 `${client.emoji.tick2} | **${targetUser.username}** [\`${targetUser.id}\`] has been given **no-prefix access**.\n` +
@@ -90,7 +90,7 @@ module.exports = {
                 return message.channel.send(errorContainer(`${client.emoji.error} | **${targetUser.username}** does not have no-prefix access.`));
             }
 
-            await client.db.set("noprefix", npList);
+            client.lmdbSet("noprefix", npList);
 
             return message.channel.send(successContainer(
                 `${client.emoji.tick2} | **${targetUser.username}** [\`${targetUser.id}\`] has been **removed** from no-prefix access.`
