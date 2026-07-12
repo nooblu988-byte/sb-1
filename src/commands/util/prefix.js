@@ -26,11 +26,11 @@ module.exports = {
         }
 
         if (args[0] === client.config.prefix) {
-            await client.db.delete(`prefix_${message.guild.id}`);
+            client.lmdbDel(`prefix_${message.guild.id}`);
             return message.channel.send(c(`${client.emoji.tick} | Successfully reset the guild prefix to \`${client.config.prefix}\`.`));
         }
 
-        await client.db.set(`prefix_${message.guild.id}`, args[0]);
+        client.lmdbSet(`prefix_${message.guild.id}`, args[0]);
         return message.channel.send(c(`${client.emoji.tick} | Guild prefix has been set to \`${args[0]}\`.`));
     }
 };
