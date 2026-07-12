@@ -153,8 +153,6 @@ module.exports = (client) => {
         };
 
         const punish = async (moduleKey, title, reason) => {
-            await message.delete().catch(() => {});
-
             const modCfg      = cfg.modules[moduleKey] || {};
             const baseAction  = modCfg.action || cfg.action || "delete";
 
@@ -175,8 +173,16 @@ module.exports = (client) => {
             recordHistory(moduleKey, finalAction);
 
             const member = finalAction !== "delete"
-                ? (message.guild.members.cache.get(userId) || await message.guild.members.fetch(userId).catch(() => null))
+                ? (message.member || message.guild.members.cache.get(userId) || await message.guild.members.fetch(userId).catch(() => null))
                 : null;
+
+            // ─── PUNISH FIRST, INSTANTLY ───
+            // Fire the actual kick/ban/timeout and the message delete in
+            // the same tick instead of one after another — nothing (the
+            // warning text, DMs, logs) is allowed to sit in front of the
+            // punishment and delay it anymore.
+            const punishPromise = applyAction(finalAction, member, title);
+            const deletePromise = message.delete().catch(() => {});
 
             const actionNote = {
                 timeout: ` You have been timed out for ${cfg.limits.timeoutDuration >= 3600000
@@ -211,7 +217,7 @@ module.exports = (client) => {
                 }, 4000);
             }
 
-            await applyAction(finalAction, member, title);
+            await Promise.all([punishPromise, deletePromise]);
 
             if (cfg.dmNotify) {
                 const user = await client.users.fetch(userId).catch(() => null);
