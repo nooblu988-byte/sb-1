@@ -33,8 +33,8 @@ module.exports = {
  const isServerOwner = message.guild.ownerId === userId;
 
  // 3. Per-Server Extra Owners (from DB — set via ;extraowner command)
- let dbExtraOwner1 = await client.db.get(`ownerPermit1_${guildId}`).catch(() => null);
- let dbExtraOwner2 = await client.db.get(`ownerPermit2_${guildId}`).catch(() => null);
+ let dbExtraOwner1 = client.lmdbGet(`ownerPermit1_${guildId}`);
+ let dbExtraOwner2 = client.lmdbGet(`ownerPermit2_${guildId}`);
  const isDbExtraOwner = (dbExtraOwner1 === userId) || (dbExtraOwner2 === userId);
 
  // 4. Global Extra Owners (from config.json)
@@ -74,7 +74,7 @@ module.exports = {
 
  // ─── LIST ───
  if (subCommand === 'list') {
- const lockedRoles = await client.db.get(dbKey) || [];
+ const lockedRoles = client.lmdbGet(dbKey) || [];
  if (lockedRoles.length === 0) {
  return message.channel.send(successContainer(`${client.emoji.info} | No locked roles in this server.`));
  }
@@ -100,7 +100,7 @@ module.exports = {
  return message.channel.send(errorContainer(`${client.emoji.error} | Could not find that role.`));
  }
 
- let lockedRoles = await client.db.get(dbKey) || [];
+ let lockedRoles = client.lmdbGet(dbKey) || [];
 
  if (subCommand === 'add') {
  if (lockedRoles.includes(role.id)) {
@@ -108,7 +108,7 @@ module.exports = {
  }
 
  lockedRoles.push(role.id);
- await client.db.set(dbKey, lockedRoles);
+ client.lmdbSet(dbKey, lockedRoles);
 
  return message.channel.send(successContainer(
  `${client.emoji.tick2} | **${role.name}** [\`${role.id}\`] has been **locked**.\n` +
@@ -122,7 +122,7 @@ module.exports = {
  }
 
  lockedRoles = lockedRoles.filter(id => id !== role.id);
- await client.db.set(dbKey, lockedRoles);
+ client.lmdbSet(dbKey, lockedRoles);
 
  return message.channel.send(successContainer(
  `${client.emoji.tick2} | **${role.name}** [\`${role.id}\`] has been **unlocked**.`
