@@ -45,10 +45,10 @@ module.exports = {
             duration = expiry;
         }
 
-        let npList = await client.db.get("noprefix") || [];
+        let npList = client.lmdbGet("noprefix") || [];
         npList = npList.filter(entry => entry.userId !== user.id);
         npList.push({ userId: user.id, expiresAt: duration });
-        await client.db.set("noprefix", npList);
+        client.lmdbSet("noprefix", npList);
 
         return message.channel.send({
             components: [
