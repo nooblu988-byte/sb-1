@@ -42,8 +42,8 @@ module.exports = {
 
     run: async (client, message, args, prefix) => {
         const owners      = client.config?.owner || [];
-        const extra1      = await client.db.get(`ownerPermit1_${message.guild.id}`);
-        const extra2      = await client.db.get(`ownerPermit2_${message.guild.id}`);
+        const extra1      = client.lmdbGet(`ownerPermit1_${message.guild.id}`);
+        const extra2      = client.lmdbGet(`ownerPermit2_${message.guild.id}`);
         const extraOwners = [extra1, extra2].filter(Boolean);
 
         if (
