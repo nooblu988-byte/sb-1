@@ -18,9 +18,9 @@ module.exports = {
         const user = message.mentions.users.first();
         if (!user) return message.reply("Please mention a user.");
 
-        let npList = await client.db.get("noprefix") || [];
+        let npList = client.lmdbGet("noprefix") || [];
         npList = npList.filter(entry => entry.userId !== user.id);
-        await client.db.set("noprefix", npList);
+        client.lmdbSet("noprefix", npList);
 
         return message.channel.send({
             components: [
