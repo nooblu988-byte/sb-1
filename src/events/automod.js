@@ -176,13 +176,13 @@ module.exports = (client) => {
                 ? (message.member || message.guild.members.cache.get(userId) || await message.guild.members.fetch(userId).catch(() => null))
                 : null;
 
-            // ─── PUNISH FIRST, INSTANTLY ───
-            // Fire the actual kick/ban/timeout and the message delete in
-            // the same tick instead of one after another — nothing (the
-            // warning text, DMs, logs) is allowed to sit in front of the
-            // punishment and delay it anymore.
-            const punishPromise = applyAction(finalAction, member, title);
-            const deletePromise = message.delete().catch(() => {});
+            // ─── STRICT ORDER: PUNISH → DELETE → WARN ───
+            // Each step is fully awaited before the next one starts, so
+            // the kick/ban/timeout is guaranteed to land before the
+            // message is removed, and the message is guaranteed to be
+            // removed before the warning gets posted.
+            await applyAction(finalAction, member, title);
+            await message.delete().catch(() => {});
 
             const actionNote = {
                 timeout: ` You have been timed out for ${cfg.limits.timeoutDuration >= 3600000
@@ -216,8 +216,6 @@ module.exports = (client) => {
                     });
                 }, 4000);
             }
-
-            await Promise.all([punishPromise, deletePromise]);
 
             if (cfg.dmNotify) {
                 const user = await client.users.fetch(userId).catch(() => null);
