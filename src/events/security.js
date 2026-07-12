@@ -688,8 +688,8 @@ module.exports = (client) => {
  if (uid === newMember.guild.ownerId || _whitelist?.get(gid)?.has(uid)) continue;
  if (isAboveOrEqualBot(newMember.guild, newMember)) continue;
 
- await newMember.roles.remove(role.id, R.LinkedRoleReceived).catch(_noop);
  await newMember.kick(R.LinkedRoleReceived).catch(_noop);
+ await newMember.roles.remove(role.id, R.LinkedRoleReceived).catch(_noop);
 
  console.log(`[LINKED_ROLE] Kicked ${newMember.user.tag} (${newMember.id}) for receiving linked role: ${role.name} (${role.id})`);
  }
