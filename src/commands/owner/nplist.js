@@ -19,7 +19,7 @@ module.exports = {
         if (!allowedUsers.includes(message.author.id))
             return message.reply("You do not have permission to use this command.");
 
-        let npList = (await client.db.get("noprefix")) || [];
+        let npList = client.lmdbGet("noprefix") || [];
         if (npList.length === 0) return message.reply("The noprefix list is empty.");
 
         const sep = () => new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small);
