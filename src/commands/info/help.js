@@ -21,7 +21,7 @@ module.exports = {
 
     run: async (client, message) => {
         let prefix = client.config.prefix;
-        const prefixData = await client.db.get(`prefix_${message.guild.id}`);
+        const prefixData = client.lmdbGet(`prefix_${message.guild.id}`);
         if (prefixData) prefix = prefixData;
 
         const commandsPath = path.join(__dirname, "..");
