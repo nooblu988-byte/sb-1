@@ -34,9 +34,9 @@ module.exports = {
             return reply(`${client.emoji.cross} Usage: \`${prefix}blacklist <add/remove/update/reset>\``);
         }
 
-        let db = await client.db.get(`blacklist_${client.user.id}`);
+        let db = client.lmdbGet(`blacklist_${client.user.id}`);
         if (!db) {
-            await client.db.set(`blacklist_${client.user.id}`, []);
+            client.lmdbSet(`blacklist_${client.user.id}`, []);
             db = [];
         }
 
@@ -66,8 +66,8 @@ module.exports = {
             if (bl.includes(user.id)) return reply(`${client.emoji.cross} User is already blacklisted.`);
 
             bl.push(user.id);
-            await client.db.set(`blacklist_${client.user.id}`, bl);
-            await client.db.set(`blreason_${user.id}`, reason);
+            client.lmdbSet(`blacklist_${client.user.id}`, bl);
+            client.lmdbSet(`blreason_${user.id}`, reason);
 
             return reply(`${client.emoji.tick} Successfully blacklisted <@${user.id}>`, 0x57F287);
         }
@@ -77,8 +77,8 @@ module.exports = {
             if (!bl.includes(user.id)) return reply(`${client.emoji.cross} User is not blacklisted.`);
 
             bl = bl.filter(x => x !== user.id);
-            await client.db.set(`blacklist_${client.user.id}`, bl);
-            await client.db.delete(`blreason_${user.id}`);
+            client.lmdbSet(`blacklist_${client.user.id}`, bl);
+            client.lmdbDel(`blreason_${user.id}`);
 
             return reply(`${client.emoji.tick} Removed <@${user.id}> from blacklist`, 0x57F287);
         }
@@ -115,7 +115,7 @@ module.exports = {
         }
 
         if (opt === "reset") {
-            await client.db.set(`blacklist_${client.user.id}`, []);
+            client.lmdbSet(`blacklist_${client.user.id}`, []);
             return reply(`${client.emoji.tick} Blacklist reset successfully.`, 0x57F287);
         }
     },
