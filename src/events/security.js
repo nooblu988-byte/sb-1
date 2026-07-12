@@ -538,7 +538,7 @@ module.exports = (client) => {
  // Get locked roles from DB
  let lockedRoles = [];
  try {
- lockedRoles = await client.db.get(`lockedRoles_${gid}`) || [];
+ lockedRoles = client.lmdbGet(`lockedRoles_${gid}`) || [];
  } catch (e) {
  lockedRoles = [];
  }
@@ -609,8 +609,8 @@ module.exports = (client) => {
  // 3. Per-Server Extra Owners (from DB — set via ;extraowner command)
  let isDbExtraOwner = false;
  try {
- const dbExtra1 = await client.db.get(`ownerPermit1_${guildId}`);
- const dbExtra2 = await client.db.get(`ownerPermit2_${guildId}`);
+ const dbExtra1 = client.lmdbGet(`ownerPermit1_${guildId}`);
+ const dbExtra2 = client.lmdbGet(`ownerPermit2_${guildId}`);
  isDbExtraOwner = (dbExtra1 === executorId) || (dbExtra2 === executorId);
  } catch (e) {
  isDbExtraOwner = false;
