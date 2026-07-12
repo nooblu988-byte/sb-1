@@ -14,8 +14,8 @@ module.exports = {
             return message.channel.send(c(`${client.emoji.cross} Only Guild Owner is allowed to run this command.`));
         }
 
-        let a = await client.db.get(`ownerPermit1_${message.guild.id}`);
-        let b = await client.db.get(`ownerPermit2_${message.guild.id}`);
+        let a = client.lmdbGet(`ownerPermit1_${message.guild.id}`);
+        let b = client.lmdbGet(`ownerPermit2_${message.guild.id}`);
 
         if (!args[0]) {
             return message.channel.send({
@@ -68,9 +68,9 @@ module.exports = {
             }
 
             if (a == null) {
-                await client.db.set(`ownerPermit1_${message.guild.id}`, user.id);
+                client.lmdbSet(`ownerPermit1_${message.guild.id}`, user.id);
             } else if (b == null) {
-                await client.db.set(`ownerPermit2_${message.guild.id}`, user.id);
+                client.lmdbSet(`ownerPermit2_${message.guild.id}`, user.id);
             } else {
                 return message.channel.send(c(`${client.emoji.cross} Can't add more than 2 extra owners.`));
             }
@@ -80,9 +80,9 @@ module.exports = {
 
         if (opt === "remove") {
             if (user.id === a) {
-                await client.db.delete(`ownerPermit1_${message.guild.id}`);
+                client.lmdbDel(`ownerPermit1_${message.guild.id}`);
             } else if (user.id === b) {
-                await client.db.delete(`ownerPermit2_${message.guild.id}`);
+                client.lmdbDel(`ownerPermit2_${message.guild.id}`);
             } else {
                 return message.channel.send(c(`${client.emoji.cross} ${user} is not an Extra Owner.`));
             }
