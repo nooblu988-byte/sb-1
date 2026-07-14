@@ -105,13 +105,45 @@ module.exports = (client) => {
 
         
         if (cfg.modules.botFilter.enabled && member.user.bot) {
-            await executeAction(member.id, "AntiRaid: Unauthorized bot");
-            await sendAlert("Bot Blocked",
-                `**Bot:** ${member.user.tag} (\`${member.id}\`)\n` +
-                `**Action:** ${actionLabel}\n` +
-                `**Reason:** Unauthorized bot join\n` +
-                `**Time:** ${ts}`
-            );
+            // A bot should never get kicked here if either:
+            //  (a) it was manually authorized via `;whitelist add @bot`, or
+            //  (b) whoever just invited it is the owner / whitelisted.
+            // (a) covers bots already in the server; (b) covers a trusted
+            // person inviting a brand-new bot right now — checked via a
+            // quick audit-log lookup so it works instantly, without
+            // depending on any other file's timing.
+            const authorizedBots = client.lmdbGet(`authorizedBots_${guildId}`) || [];
+            const botIsAuthorized = authorizedBots.includes(member.id);
+
+            let inviterTrusted = false;
+            if (!botIsAuthorized) {
+                try {
+                    const logs  = await member.guild.fetchAuditLogs({ type: 28, limit: 5 }); // BOT_ADD
+                    const entry = logs.entries.find(e =>
+                        e.target?.id === member.id &&
+                        Date.now() - e.createdTimestamp < 15000
+                    );
+                    const inviterId = entry?.executor?.id || null;
+                    inviterTrusted = !!inviterId && (
+                        inviterId === member.guild.ownerId ||
+                        whitelist.includes(inviterId) ||
+                        extra1 === inviterId ||
+                        extra2 === inviterId
+                    );
+                } catch (err) {
+                    console.log('[ANTIRAID] Bot-add audit log fetch failed:', err.message);
+                }
+            }
+
+            if (!botIsAuthorized && !inviterTrusted) {
+                await executeAction(member.id, "AntiRaid: Unauthorized bot");
+                await sendAlert("Bot Blocked",
+                    `**Bot:** ${member.user.tag} (\`${member.id}\`)\n` +
+                    `**Action:** ${actionLabel}\n` +
+                    `**Reason:** Unauthorized bot join\n` +
+                    `**Time:** ${ts}`
+                );
+            }
             return;
         }
 
