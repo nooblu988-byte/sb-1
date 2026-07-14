@@ -62,7 +62,8 @@ module.exports = {
                                 `\`${prefix}whitelist add <user>\` — Add a user\n` +
                                 `\`${prefix}whitelist remove <user>\` — Remove a user\n` +
                                 `\`${prefix}whitelist show\` — View all whitelisted users\n` +
-                                `\`${prefix}whitelist reset\` — Clear the whitelist`
+                                `\`${prefix}whitelist reset\` — Clear the whitelist\n\n` +
+                                `-# Adding a bot marks it as an **authorized bot** instead — its own actions (channels/roles it creates while doing its job) won't be flagged.`
                             )
                         )
                         .addSeparatorComponents(sep())
@@ -197,6 +198,44 @@ module.exports = {
                 });
             }
 
+            if (user.bot) {
+                const abKey = `authorizedBots_${guildId}`;
+                const authorizedBots = client.lmdbGet(abKey) || [];
+
+                if (authorizedBots.includes(user.id)) {
+                    return message.reply({
+                        components: [
+                            new ContainerBuilder()
+                                .setAccentColor(0x26272F)
+                                .addTextDisplayComponents(
+                                    new TextDisplayBuilder().setContent(
+                                        `${client.emoji.cross} **${user.tag}** is already an authorized bot.`
+                                    )
+                                ),
+                        ],
+                        flags: MessageFlags.IsComponentsV2,
+                    });
+                }
+
+                authorizedBots.push(user.id);
+                client.lmdbSet(abKey, authorizedBots);
+                client.updateAuthorizedBotsCache?.(guildId, user.id, true);
+
+                return message.reply({
+                    components: [
+                        new ContainerBuilder()
+                            .setAccentColor(0x57F287)
+                            .addTextDisplayComponents(
+                                new TextDisplayBuilder().setContent(
+                                    `${client.emoji.enabled2} **${user.tag}** has been marked as an **authorized bot**.\n` +
+                                    `-# ID: \`${user.id}\` — its own actions (creating channels/roles, etc.) will no longer be flagged by antinuke.`
+                                )
+                            ),
+                    ],
+                    flags: MessageFlags.IsComponentsV2,
+                });
+            }
+
             if (whitelist.includes(user.id)) {
                 return message.reply({
                     components: [
@@ -260,6 +299,43 @@ module.exports = {
                             .setAccentColor(0xFF0000)
                             .addTextDisplayComponents(
                                 new TextDisplayBuilder().setContent(`${client.emoji.cross} Invalid user ID.`)
+                            ),
+                    ],
+                    flags: MessageFlags.IsComponentsV2,
+                });
+            }
+
+            if (user.bot) {
+                const abKey = `authorizedBots_${guildId}`;
+                let authorizedBots = client.lmdbGet(abKey) || [];
+
+                if (!authorizedBots.includes(user.id)) {
+                    return message.reply({
+                        components: [
+                            new ContainerBuilder()
+                                .setAccentColor(0x26272F)
+                                .addTextDisplayComponents(
+                                    new TextDisplayBuilder().setContent(
+                                        `${client.emoji.cross} **${user.tag}** is not an authorized bot.`
+                                    )
+                                ),
+                        ],
+                        flags: MessageFlags.IsComponentsV2,
+                    });
+                }
+
+                authorizedBots = authorizedBots.filter(x => x !== user.id);
+                client.lmdbSet(abKey, authorizedBots);
+                client.updateAuthorizedBotsCache?.(guildId, user.id, false);
+
+                return message.reply({
+                    components: [
+                        new ContainerBuilder()
+                            .setAccentColor(0xFF0000)
+                            .addTextDisplayComponents(
+                                new TextDisplayBuilder().setContent(
+                                    `${client.emoji.disabled2} **${user.tag}** is no longer an authorized bot.\n-# ID: \`${user.id}\``
+                                )
                             ),
                     ],
                     flags: MessageFlags.IsComponentsV2,
