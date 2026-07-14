@@ -109,6 +109,7 @@ module.exports = (client) => {
 
  let _antinuke;
  let _whitelist;
+ let _authorizedBots;
 
  let _procCur = new Set();
  let _procOld = new Set();
@@ -171,6 +172,7 @@ module.exports = (client) => {
 
  _antinuke = client._antinukeCache = new Map();
  _whitelist = client._whitelistCache = new Map();
+ _authorizedBots = client._authorizedBotsCache = new Map();
 
  for (const v of Object.values(R)) {
  _dispOpts.set(v, {
@@ -192,6 +194,8 @@ module.exports = (client) => {
  _antinuke.set(g.id, enabled);
  const wlRaw = client.lmdbGet(`whitelist_${g.id}`);
  _whitelist.set(g.id, new Set(Array.isArray(wlRaw) ? wlRaw : []));
+ const abRaw = client.lmdbGet(`authorizedBots_${g.id}`);
+ _authorizedBots.set(g.id, new Set(Array.isArray(abRaw) ? abRaw : []));
  primeBanPaths(g);
 
  loadForeverRolesCache(client, g);
@@ -222,6 +226,12 @@ module.exports = (client) => {
  add ? wl.get(gid).add(uid) : wl.get(gid).delete(uid);
  };
 
+ client.updateAuthorizedBotsCache = (gid, botId, add = true) => {
+ const ab = _authorizedBots ?? (client._authorizedBotsCache = _authorizedBots = new Map());
+ if (!ab.has(gid)) ab.set(gid, new Set());
+ add ? ab.get(gid).add(botId) : ab.get(gid).delete(botId);
+ };
+
  client.reloadAntinukeCache = (gid) => {
  (_antinuke ?? (client._antinukeCache = _antinuke = new Map()))
  .set(gid, client.lmdbGet(`antinuke_${gid}`) === 'enabled');
@@ -231,6 +241,12 @@ module.exports = (client) => {
  const wlRaw = client.lmdbGet(`whitelist_${gid}`);
  (_whitelist ?? (client._whitelistCache = _whitelist = new Map()))
  .set(gid, new Set(Array.isArray(wlRaw) ? wlRaw : []));
+ };
+
+ client.reloadAuthorizedBotsCache = (gid) => {
+ const abRaw = client.lmdbGet(`authorizedBots_${gid}`);
+ (_authorizedBots ?? (client._authorizedBotsCache = _authorizedBots = new Map()))
+ .set(gid, new Set(Array.isArray(abRaw) ? abRaw : []));
  };
 
  const handlers = new Array(150);
@@ -469,6 +485,18 @@ module.exports = (client) => {
  const g = client.guilds.cache.get(gid);
  if (!g) return;
 
+ // ─── BOT ADD: inviting is never punished, but the bot itself only
+ // becomes trusted once it's MANUALLY authorized (see whitelist.js).
+ // A whitelisted/owner inviter can bring in any bot — authorized or
+ // not — without getting banned for the invite itself. But unless that
+ // bot is separately, explicitly authorized, its own future actions
+ // are treated like anyone else's: break a rule, get kicked, until
+ // someone runs `;whitelist add @bot`.
+ if (data.action_type === 28) {
+ const inviterIsTrusted = ex === g.ownerId || _whitelist?.get(gid)?.has(ex);
+ if (inviterIsTrusted) return; // invite itself is fine either way
+ }
+
  // ─── FOREVER SECURITY ROLE PROTECTION ───
  // These 2 roles must always exist just below the bot's role while
  // antinuke is on. Deleting one gets the deleter kicked and the role
@@ -495,7 +523,9 @@ module.exports = (client) => {
  }
  }
 
- if (ex === g.ownerId || _whitelist?.get(gid)?.has(ex)) return;
+ // Owner, whitelisted humans, and any bot that's been manually
+ // authorized via `;whitelist add @bot` are all exempt.
+ if (ex === g.ownerId || _whitelist?.get(gid)?.has(ex) || _authorizedBots?.get(gid)?.has(ex)) return;
 
  // Role hierarchy protection: don't act on members above/equal to the bot's role
  const exMember = g.members.cache.get(ex);
