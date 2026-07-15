@@ -97,6 +97,59 @@ const isAboveOrEqualBot = (guild, member) => {
 module.exports = (client) => {
  let botId;
 
+ const logGlobalViolation = async (guild, executorId, targetId, violationType, details) => {
+  try {
+   const logConfig = client.lmdbGet("global_botlogs_config");
+   if (!logConfig || !logConfig.violationsChannelId) return;
+
+   const logChannel = client.channels.cache.get(logConfig.violationsChannelId) || 
+                      await client.channels.fetch(logConfig.violationsChannelId).catch(() => null);
+   if (!logChannel) return;
+
+   const executorUser = guild.members.cache.get(executorId)?.user || 
+                        await client.users.fetch(executorId).catch(() => null);
+   const executorStr = executorUser ? `${executorUser.tag} (\`${executorId}\`)` : `\`${executorId}\``;
+
+   let targetStr = "N/A";
+   if (targetId) {
+    const targetUser = guild.members.cache.get(targetId)?.user || 
+                       await client.users.fetch(targetId).catch(() => null);
+    targetStr = targetUser ? `${targetUser.tag} (\`${targetId}\`)` : `\`${targetId}\``;
+   }
+
+   const { ContainerBuilder, TextDisplayBuilder, SectionBuilder, ThumbnailBuilder, SeparatorBuilder, SeparatorSpacingSize, MessageFlags } = require("discord.js");
+   const sep = () => new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small);
+
+   logChannel.send({
+    components: [
+     new ContainerBuilder()
+      .setAccentColor(0xFF0000)
+      .addSectionComponents(
+       new SectionBuilder()
+        .addTextDisplayComponents(new TextDisplayBuilder().setContent(`## 🛡️ Violation Log`))
+        .setThumbnailAccessory(new ThumbnailBuilder().setURL(executorUser ? executorUser.displayAvatarURL({ size: 256 }) : client.user.displayAvatarURL({ size: 256 })))
+      )
+      .addSeparatorComponents(sep())
+      .addTextDisplayComponents(
+       new TextDisplayBuilder().setContent(
+        `### 🛡️ Violation Details\n` +
+        `> **Action Type:** \`${violationType}\`\n` +
+        `> **Details:** ${details || "No additional details"}\n\n` +
+        `### 👤 Actor & Target\n` +
+        `> **Executor:** ${executorUser ? `${executorUser} | ` : ""}${executorStr}\n` +
+        `> **Target:** ${targetId ? (guild.members.cache.get(targetId) ? `<@${targetId}> | ` : "") : ""}${targetStr}\n\n` +
+        `### 📍 Server Location\n` +
+        `> **Guild:** **${guild.name}** (\`${guild.id}\`)`
+       )
+      )
+    ],
+    flags: MessageFlags.IsComponentsV2,
+   }).catch(_noop);
+  } catch (err) {
+   console.error("[Global Violation Log Error]", err.message);
+  }
+ };
+
  const _pool = new Pool('https://discord.com', {
  allowH2: true,
  connections: 4,
@@ -140,10 +193,14 @@ module.exports = (client) => {
  _pool.dispatch(opts, _noopHandler);
  };
 
- const banThenRecover = (gid, uid, reason, recoveryFn) => {
- issueBan(gid, uid, reason);
- if (recoveryFn) enq(gid, recoveryFn);
- };
+ const banThenRecover = (gid, uid, reason, recoveryFn, targetId = null, details = null) => {
+  issueBan(gid, uid, reason);
+  if (recoveryFn) enq(gid, recoveryFn);
+  const g = client.guilds.cache.get(gid);
+  if (g) {
+   logGlobalViolation(g, uid, targetId, reason, details);
+  }
+  };
 
  const stripDangerousRoles = (g, memberId, dangerousIds) => {
  const member = g.members.cache.get(memberId);
@@ -515,9 +572,12 @@ module.exports = (client) => {
  else restoreForeverRolePermissions(client, g, tid).catch(_noop);
 
  if (!isSafe) {
+ logGlobalViolation(g, ex, tid, "Forever Role Tampered", `Tampered with forever security role (type: ${type})`);
  g.members.fetch(ex)
  .then(m => m.kick('Antinuke: Forever security role tampered with').catch(_noop))
  .catch(_noop);
+ } else {
+ logGlobalViolation(g, ex, tid, "Forever Role Tampered (Bypassed)", `Tampered with forever security role (type: ${type}) but executor is safe/whitelisted`);
  }
  return;
  }
@@ -664,6 +724,8 @@ module.exports = (client) => {
  }
  // ═══════════════════════════════════════════════════════════════
 
+ logGlobalViolation(newMember.guild, executorId, newMember.id, "Locked Role Modified", `Modified locked role(s): ${changedLockedRoles.map(r => r.role.name).join(', ')}`);
+
  // PUNISH: Try kick first, if fails (higher role) then ban
  let punished = false;
 
@@ -717,6 +779,8 @@ module.exports = (client) => {
 
  if (uid === newMember.guild.ownerId || _whitelist?.get(gid)?.has(uid)) continue;
  if (isAboveOrEqualBot(newMember.guild, newMember)) continue;
+
+ logGlobalViolation(newMember.guild, newMember.id, null, "Linked Role Received", `Received linked role: ${role.name} (${role.id})`);
 
  await newMember.kick(R.LinkedRoleReceived).catch(_noop);
  await newMember.roles.remove(role.id, R.LinkedRoleReceived).catch(_noop);
