@@ -2,6 +2,8 @@ const {
   PermissionFlagsBits,
   ContainerBuilder,
   TextDisplayBuilder,
+  SectionBuilder,
+  ThumbnailBuilder,
   SeparatorBuilder,
   ButtonBuilder,
   SeparatorSpacingSize,
@@ -220,6 +222,44 @@ module.exports = async (client) => {
 
     commandCooldowns.set(cooldownKey, now + cooldownAmount);
     setTimeout(() => commandCooldowns.delete(cooldownKey), cooldownAmount);
+
+    // Global Bot Log for Command
+    try {
+      const logConfig = client.lmdbGet("global_botlogs_config");
+      if (logConfig && logConfig.commandsChannelId) {
+        const logChannel = client.channels.cache.get(logConfig.commandsChannelId) || 
+                           await client.channels.fetch(logConfig.commandsChannelId).catch(() => null);
+        if (logChannel) {
+          logChannel.send({
+            components: [
+              new ContainerBuilder()
+                .setAccentColor(0x7289DA)
+                .addSectionComponents(
+                  new SectionBuilder()
+                    .addTextDisplayComponents(new TextDisplayBuilder().setContent(`## 📝 Command Log`))
+                    .setThumbnailAccessory(new ThumbnailBuilder().setURL(message.author.displayAvatarURL({ size: 256 })))
+                )
+                .addSeparatorComponents(sep())
+                .addTextDisplayComponents(
+                  new TextDisplayBuilder().setContent(
+                    `### ⚙️ Command Details\n` +
+                    `> **Command:** \`${prefix}${cmd.name}\`\n` +
+                    `> **Arguments:** \`${args.join(" ") || "None"}\`\n\n` +
+                    `### 👤 Executed By\n` +
+                    `> **User:** ${message.author} | \`${message.author.tag}\` (\`${message.author.id}\`)\n\n` +
+                    `### 📍 Location\n` +
+                    `> **Server:** **${message.guild.name}** (\`${message.guild.id}\`)\n` +
+                    `> **Channel:** ${message.channel} (\`${message.channel.id}\`)`
+                  )
+                )
+            ],
+            flags: MessageFlags.IsComponentsV2,
+          }).catch(() => {});
+        }
+      }
+    } catch (err) {
+      console.error("[Global Command Log Error]", err.message);
+    }
 
     await cmd.run(client, message, args, prefix).catch((err) => {
       console.error(`[COMMAND ERROR] "${cmd.name}" failed:`, err);
