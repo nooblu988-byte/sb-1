@@ -9,8 +9,8 @@ const {
 } = require("discord.js");
 
 module.exports = {
-    name: "leaveserver",
-    aliases: ["gl", "gleave"],
+    name: "botleave",
+    aliases: ["gl", "gleave", "leaveserver"],
     description: "Leave a server by ID",
     category: "owner",
     cooldown: 3,
