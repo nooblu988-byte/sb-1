@@ -43,6 +43,25 @@ const normalizeLeet = (text) => text
 const spamTracker   = new Map();
 const mentionTracker = new Map();
 
+// ─── PERIODIC CLEANUP ───
+// spamTracker/mentionTracker never delete their own keys — only the
+// arrays inside get cleared/reset. Left alone, this grows forever (one
+// entry per user who has EVER sent a message since the bot started),
+// which over long uptime bloats the heap and can cause longer/more
+// frequent GC pauses — a real source of occasional, unpredictable
+// slowness across the whole bot, not just automod. This sweep drops any
+// entry that's been empty/inactive for a while, keeping memory bounded
+// to only currently-active users.
+setInterval(() => {
+    const now = Date.now();
+    for (const [key, times] of spamTracker) {
+        if (!times.length || now - times[times.length - 1] > 300_000) spamTracker.delete(key);
+    }
+    for (const [key, times] of mentionTracker) {
+        if (!times.length || now - times[times.length - 1] > 300_000) mentionTracker.delete(key);
+    }
+}, 5 * 60 * 1000);
+
 const DEFAULT_CFG = {
     modules: {
         promotion:   { enabled: true,  action: "delete" },
