@@ -44,6 +44,17 @@ const getConfig = (client, guildId) => {
 
 const joinTracker = new Map();
 
+// ─── PERIODIC CLEANUP ───
+// Same reasoning as automod's spamTracker/mentionTracker cleanup — this
+// never deletes its own keys otherwise, so it's swept every 5 minutes to
+// keep memory bounded and avoid long-uptime GC pressure.
+setInterval(() => {
+    const now = Date.now();
+    for (const [guildId, joins] of joinTracker) {
+        if (!joins.length || now - joins[joins.length - 1].at > 300_000) joinTracker.delete(guildId);
+    }
+}, 5 * 60 * 1000);
+
 module.exports = (client) => {
     client.on("guildMemberAdd", async (member) => {
         if (!member.user) return;
