@@ -51,12 +51,11 @@ function roundRect(ctx, x, y, width, height, radius) {
 }
 
 /**
- * Applies a glowing border and shining stars/sparkles around the PFP.
- * @param {Buffer} pfpBuffer - The original image buffer.
- * @param {boolean} isDuo - Whether this is a duo participant.
- * @returns {Promise<Buffer>} - The processed image buffer.
+ * Preprocesses and loads a profile picture buffer, handling SVG conversions and Jimp fallbacks.
+ * @param {Buffer} pfpBuffer - The raw image buffer.
+ * @returns {Promise<Image>} - The loaded image object.
  */
-async function applyPfpEffects(pfpBuffer, isDuo = false) {
+async function loadPfpImage(pfpBuffer) {
     let finalBuffer = pfpBuffer;
 
     // Detect if the buffer is actually an SVG image
@@ -73,7 +72,7 @@ async function applyPfpEffects(pfpBuffer, isDuo = false) {
         }
     }
 
-    // 1. Load the PFP image with fallback to Jimp for self-adjustment
+    // Load the PFP image with fallback to Jimp for self-adjustment
     let img;
     try {
         img = await loadImage(finalBuffer);
@@ -90,6 +89,17 @@ async function applyPfpEffects(pfpBuffer, isDuo = false) {
             throw err; // rethrow original Skia error if Jimp fails
         }
     }
+    return img;
+}
+
+/**
+ * Applies a glowing border and shining stars/sparkles around the PFP.
+ * @param {Buffer} pfpBuffer - The original image buffer.
+ * @param {boolean} isDuo - Whether this is a duo participant.
+ * @returns {Promise<Buffer>} - The processed image buffer.
+ */
+async function applyPfpEffects(pfpBuffer, isDuo = false) {
+    const img = await loadPfpImage(pfpBuffer);
 
     const W = img.width;
     const H = img.height;
@@ -100,7 +110,7 @@ async function applyPfpEffects(pfpBuffer, isDuo = false) {
     const canvasW = W + padding * 2;
     const canvasH = H + padding * 2;
 
-    // 2. Create canvas
+    // Create canvas
     const canvas = createCanvas(canvasW, canvasH);
     const ctx = canvas.getContext("2d");
 
@@ -113,7 +123,7 @@ async function applyPfpEffects(pfpBuffer, isDuo = false) {
     const borderH = H + 36;
     const borderRadius = Math.max(16, Math.floor(Math.min(W, H) * 0.08) + 6);
 
-    // 3. Draw a soft, attractive glowing shadow behind the main box
+    // Draw a soft, attractive glowing shadow behind the main box
     ctx.save();
     ctx.shadowColor = "rgba(255, 0, 127, 0.25)";
     ctx.shadowBlur = 15;
@@ -122,7 +132,7 @@ async function applyPfpEffects(pfpBuffer, isDuo = false) {
     ctx.fill();
     ctx.restore();
 
-    // 4. Draw the clipped PFP (drawn at its exact original size W x H)
+    // Draw the clipped PFP
     ctx.save();
     const imageRadius = Math.max(8, borderRadius - 8);
     roundRect(ctx, padding, padding, W, H, imageRadius);
@@ -130,7 +140,7 @@ async function applyPfpEffects(pfpBuffer, isDuo = false) {
     ctx.drawImage(img, padding, padding, W, H);
     ctx.restore();
 
-    // 5. Draw a soft neon gradient border with a strong neon glow around the outer boundary
+    // Draw a soft neon gradient border with a strong neon glow around the outer boundary
     ctx.save();
     const grad = ctx.createLinearGradient(borderX, borderY, borderX + borderW, borderY + borderH);
     grad.addColorStop(0, "#FF007F");   // Neon Pink
@@ -182,7 +192,7 @@ async function applyPfpEffects(pfpBuffer, isDuo = false) {
 
     ctx.restore();
 
-    // 6. Draw glowing shining stars on borders
+    // Draw glowing shining stars on borders
     const baseStarSize = Math.max(4, Math.floor(Math.min(W, H) * 0.025)); // Proportionate star size
     const lgStarOuter = baseStarSize * 1.4;
     const lgStarInner = lgStarOuter * 0.4;
@@ -228,8 +238,157 @@ async function applyPfpEffects(pfpBuffer, isDuo = false) {
         drawStar(ctx, borderX + borderW * 0.7, borderY + borderH + shadowOffset, 4, smStarOuter, smStarInner, "#FFFFFF");
     }
 
+    // Return buffer
+    return canvas.toBuffer("image/png");
+}
+
+/**
+ * Merges two profile pictures side-by-side with an overlapping glow effect.
+ * @param {Buffer} pfpBuffer1 - Teammate 1's profile picture buffer.
+ * @param {Buffer} pfpBuffer2 - Teammate 2's profile picture buffer.
+ * @returns {Promise<Buffer>} - The merged and styled image buffer.
+ */
+async function applyDuoPfpEffects(pfpBuffer1, pfpBuffer2) {
+    // 1. Load both profile pictures
+    const img1 = await loadPfpImage(pfpBuffer1);
+    const img2 = await loadPfpImage(pfpBuffer2);
+
+    // 2. Set target size for each avatar (normalize to 512x512)
+    const W = 512;
+    const H = 512;
+    const gap = 24;
+
+    const combinedW = W * 2 + gap;
+    const combinedH = H;
+
+    const padding = 65;
+    const canvasW = combinedW + padding * 2;
+    const canvasH = combinedH + padding * 2;
+
+    // Create combined canvas
+    const canvas = createCanvas(canvasW, canvasH);
+    const ctx = canvas.getContext("2d");
+
+    ctx.clearRect(0, 0, canvasW, canvasH);
+
+    const borderX = padding - 18;
+    const borderY = padding - 18;
+    const borderW = combinedW + 36;
+    const borderH = combinedH + 36;
+    const borderRadius = 46;
+
+    // 3. Draw a soft, attractive glowing shadow behind the main box
+    ctx.save();
+    ctx.shadowColor = "rgba(255, 0, 127, 0.25)";
+    ctx.shadowBlur = 15;
+    roundRect(ctx, borderX, borderY, borderW, borderH, borderRadius);
+    ctx.fillStyle = "rgba(10, 10, 15, 0.85)";
+    ctx.fill();
+    ctx.restore();
+
+    // 4. Draw the clipped PFPs
+    const imageRadius = Math.max(8, borderRadius - 8);
+    
+    // First PFP
+    ctx.save();
+    roundRect(ctx, padding, padding, W, H, imageRadius);
+    ctx.clip();
+    ctx.drawImage(img1, padding, padding, W, H);
+    ctx.restore();
+
+    // Second PFP
+    ctx.save();
+    roundRect(ctx, padding + W + gap, padding, W, H, imageRadius);
+    ctx.clip();
+    ctx.drawImage(img2, padding + W + gap, padding, W, H);
+    ctx.restore();
+
+    // 5. Draw a soft neon gradient border with a strong neon glow around the outer boundary
+    ctx.save();
+    const grad = ctx.createLinearGradient(borderX, borderY, borderX + borderW, borderY + borderH);
+    grad.addColorStop(0, "#FF007F");   // Neon Pink
+    grad.addColorStop(0.33, "#7F00FF"); // Purple
+    grad.addColorStop(0.66, "#00F0FF"); // Cyan
+    grad.addColorStop(1, "#FFD700");   // Gold
+    ctx.strokeStyle = grad;
+
+    function strokeBorder(ctx) {
+        // Draw the outer border enclosing both images
+        roundRect(ctx, borderX, borderY, borderW, borderH, borderRadius);
+        ctx.stroke();
+
+        // Draw a vertical divider line between the two PFPs
+        const middleX = borderX + borderW / 2;
+        ctx.beginPath();
+        ctx.moveTo(middleX, borderY + 15);
+        ctx.lineTo(middleX, borderY + borderH - 15);
+        ctx.stroke();
+    }
+
+    // Draw first pass with a wide, soft cyan/purple glow
+    ctx.shadowColor = "rgba(0, 240, 255, 0.6)";
+    ctx.shadowBlur = 25;
+    ctx.lineWidth = 6;
+    strokeBorder(ctx);
+
+    // Draw second pass with a tight, hot pink glow for a realistic neon core look
+    ctx.shadowColor = "rgba(255, 0, 127, 0.85)";
+    ctx.shadowBlur = 12;
+    ctx.lineWidth = 5;
+    strokeBorder(ctx);
+
+    // Draw third pass without glow to keep the gradient border sharp
+    ctx.shadowBlur = 0;
+    ctx.lineWidth = 4;
+    strokeBorder(ctx);
+
+    ctx.restore();
+
+    // 6. Draw glowing shining stars on borders
+    const baseStarSize = Math.max(4, Math.floor(Math.min(W, H) * 0.025)); // Proportionate star size (approx 12)
+    const lgStarOuter = baseStarSize * 1.4;
+    const lgStarInner = lgStarOuter * 0.4;
+    const smStarOuter = baseStarSize * 0.6;
+    const smStarInner = smStarOuter * 0.35;
+
+    const starOffset = 15;
+    const cornerOffset = 12;
+    const shadowOffset = 8;
+
+    // Corners (Floating outside diagonally)
+    // Top-Left (Large White)
+    drawStar(ctx, borderX - cornerOffset, borderY - cornerOffset, 4, lgStarOuter * 1.33, lgStarInner * 1.33, "#FFFFFF");
+    // Top-Right (Large Gold)
+    drawStar(ctx, borderX + borderW + cornerOffset, borderY - cornerOffset, 4, lgStarOuter * 1.33, lgStarInner * 1.33, "#FFD700");
+    // Bottom-Left (Large Gold)
+    drawStar(ctx, borderX - cornerOffset, borderY + borderH + cornerOffset, 4, lgStarOuter * 1.33, lgStarInner * 1.33, "#FFD700");
+    // Bottom-Right (Large White)
+    drawStar(ctx, borderX + borderW + cornerOffset, borderY + borderH + cornerOffset, 4, lgStarOuter * 1.33, lgStarInner * 1.33, "#FFFFFF");
+
+    // Middle Edges
+    // Left Middle (Gold)
+    drawStar(ctx, borderX - starOffset, borderY + borderH / 2, 4, lgStarOuter, lgStarInner, "#FFD700");
+    // Right Middle (White)
+    drawStar(ctx, borderX + borderW + starOffset, borderY + borderH / 2, 4, lgStarOuter, lgStarInner, "#FFFFFF");
+    // Top Middle (Gold) - Above the divider
+    drawStar(ctx, borderX + borderW / 2, borderY - starOffset, 4, lgStarOuter, lgStarInner, "#FFD700");
+    // Bottom Middle (White) - Below the divider
+    drawStar(ctx, borderX + borderW / 2, borderY + borderH + starOffset, 4, lgStarOuter, lgStarInner, "#FFFFFF");
+
+    // Sparkles
+    drawStar(ctx, borderX - shadowOffset, borderY + borderH * 0.3, 4, smStarOuter, smStarInner, "#FFFFFF");
+    drawStar(ctx, borderX - shadowOffset, borderY + borderH * 0.7, 4, smStarOuter, smStarInner, "#FFD700");
+    drawStar(ctx, borderX + borderW + shadowOffset, borderY + borderH * 0.3, 4, smStarOuter, smStarInner, "#FFD700");
+    drawStar(ctx, borderX + borderW + shadowOffset, borderY + borderH * 0.7, 4, smStarOuter, smStarInner, "#FFFFFF");
+
+    // Top/Bottom sparkles on the border
+    drawStar(ctx, borderX + borderW * 0.25, borderY - shadowOffset, 4, smStarOuter, smStarInner, "#FFFFFF");
+    drawStar(ctx, borderX + borderW * 0.75, borderY - shadowOffset, 4, smStarOuter, smStarInner, "#FFD700");
+    drawStar(ctx, borderX + borderW * 0.25, borderY + borderH + shadowOffset, 4, smStarOuter, smStarInner, "#FFD700");
+    drawStar(ctx, borderX + borderW * 0.75, borderY + borderH + shadowOffset, 4, smStarOuter, smStarInner, "#FFFFFF");
+
     // 7. Return buffer
     return canvas.toBuffer("image/png");
 }
 
-module.exports = { applyPfpEffects };
+module.exports = { applyPfpEffects, applyDuoPfpEffects };
