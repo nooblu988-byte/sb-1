@@ -114,19 +114,17 @@ module.exports = {
         }
 
         if (sub === "disable") {
-            await message.reply({
+            await disableVoting(client, message.guild, message.author);
+            return message.reply({
                 components: [
                     new ContainerBuilder()
                         .setAccentColor(0xFF0000)
                         .addTextDisplayComponents(
-                            new TextDisplayBuilder().setContent(`${tickEmoji} **Voting system has been disabled. All databases, channels, and records have been cleaned up.**`)
+                            new TextDisplayBuilder().setContent(`${tickEmoji} **The voting system registration is now disabled.**`)
                         )
                 ],
                 flags: MessageFlags.IsComponentsV2
-            }).catch(() => {});
-
-            await disableVoting(client, message.guild, message.author);
-            return;
+            });
         }
 
         if (sub === "setemoji") {
@@ -472,7 +470,7 @@ module.exports = {
             try {
                 await message.guild.members.fetch().catch(() => {});
 
-                const cards = client.lmdbGet(`voting_cards_${guildId}`) || [];
+                const cards = (await client.db.get(`voting_cards_${guildId}`)) || [];
                 if (cards.length === 0) {
                     return statusMsg.edit({ content: `${crossEmoji} **No active voting cards found.**` });
                 }
@@ -487,7 +485,7 @@ module.exports = {
                     }).catch(() => {});
 
                     const voteKey = `votes_${guildId}_${card.messageId}`;
-                    const voters = client.lmdbGet(voteKey) || [];
+                    const voters = (await client.db.get(voteKey)) || [];
                     if (voters.length === 0) {
                         removedSummary.push({ teamName: card.teamName, original: 0, removed: 0, final: 0 });
                         continue;
@@ -516,7 +514,8 @@ module.exports = {
                     }
 
                     if (underageCount > 0) {
-                        client.lmdbSet(voteKey, filteredVoters);
+                        await client.db.set(voteKey, filteredVoters);
+                        client.lmdb.put(voteKey, filteredVoters);
                         totalRemoved += underageCount;
 
                         // Real-time leaderboard ticking updates!
