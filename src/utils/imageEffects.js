@@ -53,9 +53,10 @@ function roundRect(ctx, x, y, width, height, radius) {
 /**
  * Applies a glowing border and shining stars/sparkles around the PFP.
  * @param {Buffer} pfpBuffer - The original image buffer.
+ * @param {boolean} isDuo - Whether this is a duo participant.
  * @returns {Promise<Buffer>} - The processed image buffer.
  */
-async function applyPfpEffects(pfpBuffer) {
+async function applyPfpEffects(pfpBuffer, isDuo = false) {
     let finalBuffer = pfpBuffer;
 
     // Detect if the buffer is actually an SVG image
@@ -92,6 +93,7 @@ async function applyPfpEffects(pfpBuffer) {
 
     const W = img.width;
     const H = img.height;
+    const isPortrait = H > W;
 
     // We pad the canvas by 65px on each side (total 130px) to allow room for the outer border (18px offset) and star shadows
     const padding = 65;
