@@ -8,7 +8,8 @@ module.exports = (client) => {
         const guildId = reaction.message.guild.id;
         const messageId = reaction.message.id;
 
-        const isCard = client.lmdbGet(`voting_card_${guildId}_${messageId}`);
+        // Fetch card directly from MongoDB for real-time consistency across shards/restarts
+        const isCard = await client.db.get(`voting_card_${guildId}_${messageId}`);
         if (!isCard) return;
 
         if (reaction.partial) {
@@ -36,11 +37,15 @@ module.exports = (client) => {
         const accountAgeInDays = (Date.now() - user.createdTimestamp) / (1000 * 60 * 60 * 24);
 
         const voteKey = `votes_${guildId}_${messageId}`;
-        const voters = client.lmdbGet(voteKey) || [];
+        
+        // Fetch voters directly from MongoDB
+        const voters = (await client.db.get(voteKey)) || [];
 
         if (!voters.includes(user.id)) {
             voters.push(user.id);
-            client.lmdbSet(voteKey, voters);
+            // Write to MongoDB and keep local LMDB in sync
+            await client.db.set(voteKey, voters);
+            client.lmdb.put(voteKey, voters);
 
             const logsId = client.lmdbGet(`voting_logs_channel_${guildId}`) || 
                            client.lmdbGet(`logging_cfg_${guildId}`)?.voting;
