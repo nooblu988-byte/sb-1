@@ -101,55 +101,47 @@ module.exports = {
                 return message.reply({ content: `${crossEmoji} **Please specify a Team Name.** (e.g. \`${prefix}pfp upload @User TeamName\`)` });
             }
 
-            // Look for image attachments or direct image links
-            let pfpUrls = [];
-            let attachments = [...message.attachments.values()];
-            if (attachments.length > 0) {
-                pfpUrls = attachments.map(att => att.url);
-            } else {
-                let linkArgs = args.slice(2).filter(arg => arg.startsWith("http"));
-                if (linkArgs.length > 0) pfpUrls = linkArgs;
+            let pfpUrl = message.attachments.first()?.url;
+            if (!pfpUrl) {
+                if (message.reference) {
+                    const refMsg = await message.channel.messages.fetch(message.reference.messageId).catch(() => null);
+                    pfpUrl = refMsg?.attachments.first()?.url;
+                }
             }
 
-            if (pfpUrls.length === 0 && message.reference) {
-                const refMsg = await message.channel.messages.fetch(message.reference.messageId).catch(() => null);
-                let refAttachments = [...(refMsg?.attachments.values() || [])];
-                pfpUrls = refAttachments.map(att => att.url);
+            if (!pfpUrl) {
+                const linkArg = args.find(arg => arg.startsWith("http"));
+                if (linkArg) pfpUrl = linkArg;
             }
 
-            if (pfpUrls.length === 0) {
-                return message.reply({ content: `${crossEmoji} **Please attach image file(s) or provide direct image link(s).**` });
+            if (!pfpUrl) {
+                return message.reply({ content: `${crossEmoji} **Please attach an image file or provide a direct image link.**` });
             }
 
-            // We join up to 2 URLs for the duo processing, or 1 for single
-            const isDuoUpload = pfpUrls.length >= 2;
-            const pfpUrl = pfpUrls.slice(0, 2).join(",");
-
-            const statusMsg = await message.reply({ content: "⏳ **Downloading and processing image(s) with canvas effects...**" });
+            const statusMsg = await message.reply({ content: "⏳ **Downloading and processing image with canvas effects...**" });
 
             try {
-                const fetch = (...args) => import("node-fetch").then(({ default: fetch }) => fetch(...args));
-                const urls = pfpUrl.split(",");
-                const buffers = [];
+                const convertToPngUrl = (urlStr) => {
+                    return urlStr;
+                };
 
-                for (const url of urls) {
-                    const res = await fetch(url, {
-                        headers: {
-                            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-                        }
-                    });
-                    if (!res.ok) throw new Error("PFP download failed");
-                    const buf = await res.buffer();
-                    buffers.push(buf);
-                }
+                const fetch = (...args) => import("node-fetch").then(({ default: fetch }) => fetch(...args));
+                const targetUrl = convertToPngUrl(pfpUrl);
+                const res = await fetch(targetUrl, {
+                    headers: {
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                    }
+                });
+                if (!res.ok) throw new Error("PFP download failed");
+                const buffer = await res.buffer();
 
                 let processedBuffer;
                 try {
                     const { applyPfpEffects } = require("../../utils/imageEffects");
-                    processedBuffer = await applyPfpEffects(buffers);
+                    processedBuffer = await applyPfpEffects(buffer);
                 } catch (err) {
                     console.error("Failed to apply image effects on manual upload, using original PFP:", err);
-                    processedBuffer = buffers[0];
+                    processedBuffer = buffer;
                 }
 
                 const pfpsDir = path.join(__dirname, "..", "..", "database", "pfps");
@@ -178,7 +170,7 @@ module.exports = {
                 const participantData = {
                     userId: targetUser.id,
                     username: targetUser.tag,
-                    isDuo: isDuoUpload,
+                    isDuo: false,
                     teammateId: null,
                     teammateTag: null,
                     teamName: teamName,
@@ -214,7 +206,7 @@ module.exports = {
                                     new TextDisplayBuilder().setContent(
                                         `> **Team Name:** **${teamName}**\n` +
                                         `> **Registrant:** ${targetUser} (\`${targetUser.tag}\` / \`${targetUser.id}\`)\n` +
-                                        `> **Type:** \`${isDuoUpload ? "Duo" : "Single"} (Manual Upload)\`\n` +
+                                        `> **Type:** \`Single (Manual Upload)\`\n` +
                                         `> **Uploaded By:** ${message.author} (\`${message.author.tag}\`)\n` +
                                         `> **Timestamp:** <t:${Math.floor(Date.now() / 1000)}:F>`
                                     )
@@ -302,14 +294,15 @@ module.exports = {
                             teamName: participant.teamName
                         });
 
-                        const cards = client.lmdbGet(`voting_cards_${guildId}`) || [];
+                        const cards = (await client.db.get(`voting_cards_${guildId}`)) || [];
                         cards.push({
                             messageId: pfpMessage.id,
                             channelId: message.channel.id,
                             userId: targetUser.id,
                             teamName: participant.teamName
                         });
-                        client.lmdbSet(`voting_cards_${guildId}`, cards);
+                        await client.db.set(`voting_cards_${guildId}`, cards);
+                        client.lmdb.put(`voting_cards_${guildId}`, cards);
 
                         const logsId = client.lmdbGet(`voting_logs_channel_${guildId}`) || 
                                        client.lmdbGet(`logging_cfg_${guildId}`)?.voting;
@@ -400,14 +393,15 @@ module.exports = {
                     teamName: participant.teamName
                 });
 
-                const cards = client.lmdbGet(`voting_cards_${guildId}`) || [];
+                const cards = (await client.db.get(`voting_cards_${guildId}`)) || [];
                 cards.push({
                     messageId: pfpMessage.id,
                     channelId: message.channel.id,
                     userId: targetUser.id,
                     teamName: participant.teamName
                 });
-                client.lmdbSet(`voting_cards_${guildId}`, cards);
+                await client.db.set(`voting_cards_${guildId}`, cards);
+                client.lmdb.put(`voting_cards_${guildId}`, cards);
 
                 const logsId = client.lmdbGet(`voting_logs_channel_${guildId}`) || 
                                client.lmdbGet(`logging_cfg_${guildId}`)?.voting;
