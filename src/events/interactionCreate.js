@@ -203,6 +203,7 @@ async function runRegistrationWizard(client, thread, interaction, isDuo) {
         let teamName = "";
         let teammateUser = null;
         let pfpUrl = "";
+        let pfpUrls = [];
 
         collector.on("collect", async (m) => {
             if (step === 1) {
@@ -287,20 +288,59 @@ async function runRegistrationWizard(client, thread, interaction, isDuo) {
                     flags: MessageFlags.IsComponentsV2
                 });
             } else if (step === 3) {
-                let attachmentUrl = m.attachments.first()?.url;
-                let textUrl = m.content.trim();
+                // Collect all attachments in the message
+                const attachments = [...m.attachments.values()];
+                const urls = attachments.map(a => a.url);
 
-                if (attachmentUrl) {
-                    pfpUrl = attachmentUrl;
-                } else if (textUrl.startsWith("http")) {
-                    pfpUrl = textUrl;
+                // Collect any URLs from the message text
+                const text = m.content.trim();
+                const textUrls = text.split(/\s+/).filter(w => w.startsWith("http"));
+                
+                const currentUrls = [...urls, ...textUrls];
+
+                if (isDuo) {
+                    if (pfpUrls.length === 0) {
+                        // First input message
+                        if (currentUrls.length === 0) {
+                            return thread.send({ content: `${crossEmoji} **Please drop/attach a valid image file or paste a direct image URL.**` });
+                        }
+                        
+                        pfpUrls.push(...currentUrls);
+
+                        if (pfpUrls.length === 1) {
+                            // Only 1 image so far, ask for the second one
+                            await thread.send({
+                                content: `ℹ️ **First image received!** Please upload/send the **second image** for your teammate, or type \`skip\` to proceed with only this single image.`
+                            });
+                            return; // Wait for the next message in step 3
+                        }
+                    } else {
+                        // Second input message (pfpUrls already has 1 image)
+                        if (text.toLowerCase() === "skip") {
+                            // User wants to proceed with just 1 image
+                            pfpUrl = pfpUrls[0];
+                            collector.stop("completed");
+                            return;
+                        }
+
+                        if (currentUrls.length === 0) {
+                            return thread.send({ content: `${crossEmoji} **Please upload/send the second image, or type \`skip\` to proceed with just the first one.**` });
+                        }
+
+                        pfpUrls.push(...currentUrls);
+                    }
+                    
+                    pfpUrl = pfpUrls[0];
+                    collector.stop("completed");
+                } else {
+                    // Single Mode: proceed immediately on first valid image(s)
+                    if (currentUrls.length === 0) {
+                        return thread.send({ content: `${crossEmoji} **Please drop/attach a valid image file or paste a direct image URL.**` });
+                    }
+                    pfpUrls = currentUrls;
+                    pfpUrl = pfpUrls[0];
+                    collector.stop("completed");
                 }
-
-                if (!pfpUrl) {
-                    return thread.send({ content: `${crossEmoji} **Please drop/attach a valid image file or paste a direct image URL.**` });
-                }
-
-                collector.stop("completed");
             }
         });
 
@@ -314,27 +354,47 @@ async function runRegistrationWizard(client, thread, interaction, isDuo) {
             const loadingMsg = await thread.send({ content: "⚙️ **Downloading PFP, applying glowing border and shining stars effects...**" });
 
             try {
-                const convertToPngUrl = (urlStr) => {
-                    return urlStr;
-                };
-
                 const fetch = (...args) => import("node-fetch").then(({ default: fetch }) => fetch(...args));
-                const targetUrl = convertToPngUrl(pfpUrl);
-                const res = await fetch(targetUrl, {
-                    headers: {
-                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-                    }
-                });
-                if (!res.ok) throw new Error("PFP download failed");
-                const buffer = await res.buffer();
-
+                
                 let processedBuffer;
                 try {
-                    const { applyPfpEffects } = require("../utils/imageEffects");
-                    processedBuffer = await applyPfpEffects(buffer, isDuo);
+                    if (isDuo && pfpUrls.length >= 2) {
+                        // Download both images
+                        const [res1, res2] = await Promise.all([
+                            fetch(pfpUrls[0], {
+                                headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" }
+                            }),
+                            fetch(pfpUrls[1], {
+                                headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" }
+                            })
+                        ]);
+                        if (!res1.ok || !res2.ok) throw new Error("Failed to download teammate PFPs");
+                        
+                        const [buf1, buf2] = await Promise.all([
+                            res1.buffer(),
+                            res2.buffer()
+                        ]);
+
+                        const { applyDuoPfpEffects } = require("../utils/imageEffects");
+                        processedBuffer = await applyDuoPfpEffects(buf1, buf2);
+                    } else {
+                        // Single image processing (or only 1 URL provided for Duo)
+                        const res = await fetch(pfpUrl, {
+                            headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" }
+                        });
+                        if (!res.ok) throw new Error("PFP download failed");
+                        const buffer = await res.buffer();
+                        
+                        const { applyPfpEffects } = require("../utils/imageEffects");
+                        processedBuffer = await applyPfpEffects(buffer, isDuo);
+                    }
                 } catch (err) {
-                    console.error("Failed to apply image effects, using original PFP:", err);
-                    processedBuffer = buffer;
+                    console.error("Failed to apply image effects, using original/first PFP:", err);
+                    // Fallback to first image buffer
+                    const res = await fetch(pfpUrl, {
+                        headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" }
+                    });
+                    processedBuffer = await res.buffer();
                 }
 
                 const fs = require("fs");
