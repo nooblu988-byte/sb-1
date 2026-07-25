@@ -97,12 +97,11 @@ module.exports = (client) => {
                     });
                 }
             } else {
-                await interaction.reply({
-                    content: `${tickEmoji} **Voting system has been disabled. All databases, channels, and records have been cleaned up.**`,
-                    flags: 64
-                }).catch(() => {});
-
                 await disableVoting(client, interaction.guild, interaction.user);
+                await interaction.reply({
+                    content: `${tickEmoji} **Voting registration buttons have been successfully disabled.**`,
+                    flags: 64
+                });
             }
             return;
         }
@@ -281,32 +280,24 @@ async function runRegistrationWizard(client, thread, interaction, isDuo) {
                             .setAccentColor(0x26272F)
                             .addTextDisplayComponents(
                                 new TextDisplayBuilder().setContent(
-                                    `${arrowEmoji} **Step 3:** Please **drop/attach the team profile pictures (PFPs)** you want to use for voting, or paste direct image URLs (you can attach up to 2 PFPs).`
+                                    `${arrowEmoji} **Step 3:** Please **drop or attach the team's profile picture (PFP)** you want to use for voting, or send a direct image URL.`
                                 )
                             )
                     ],
                     flags: MessageFlags.IsComponentsV2
                 });
             } else if (step === 3) {
-                let attachments = [...m.attachments.values()];
-                let pfpUrls = [];
+                let attachmentUrl = m.attachments.first()?.url;
+                let textUrl = m.content.trim();
 
-                if (attachments.length > 0) {
-                    pfpUrls = attachments.map(att => att.url);
-                } else {
-                    let textUrls = m.content.trim().split(/\s+/);
-                    pfpUrls = textUrls.filter(url => url.startsWith("http"));
+                if (attachmentUrl) {
+                    pfpUrl = attachmentUrl;
+                } else if (textUrl.startsWith("http")) {
+                    pfpUrl = textUrl;
                 }
 
-                if (pfpUrls.length === 0) {
+                if (!pfpUrl) {
                     return thread.send({ content: `${crossEmoji} **Please drop/attach a valid image file or paste a direct image URL.**` });
-                }
-
-                if (!isDuo) {
-                    pfpUrl = pfpUrls[0];
-                } else {
-                    // For Duo Entry, allow up to 2 PFPs (joined by comma)
-                    pfpUrl = pfpUrls.slice(0, 2).join(",");
                 }
 
                 collector.stop("completed");
@@ -320,31 +311,30 @@ async function runRegistrationWizard(client, thread, interaction, isDuo) {
                 return;
             }
 
-            const loadingMsg = await thread.send({ content: "⚙️ **Downloading PFP(s), combining and styling borders/stars...**" });
+            const loadingMsg = await thread.send({ content: "⚙️ **Downloading PFP, applying glowing border and shining stars effects...**" });
 
             try {
-                const fetch = (...args) => import("node-fetch").then(({ default: fetch }) => fetch(...args));
-                const urls = pfpUrl.split(",");
-                const buffers = [];
+                const convertToPngUrl = (urlStr) => {
+                    return urlStr;
+                };
 
-                for (const url of urls) {
-                    const res = await fetch(url, {
-                        headers: {
-                            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-                        }
-                    });
-                    if (!res.ok) throw new Error("PFP download failed");
-                    const buf = await res.buffer();
-                    buffers.push(buf);
-                }
+                const fetch = (...args) => import("node-fetch").then(({ default: fetch }) => fetch(...args));
+                const targetUrl = convertToPngUrl(pfpUrl);
+                const res = await fetch(targetUrl, {
+                    headers: {
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                    }
+                });
+                if (!res.ok) throw new Error("PFP download failed");
+                const buffer = await res.buffer();
 
                 let processedBuffer;
                 try {
                     const { applyPfpEffects } = require("../utils/imageEffects");
-                    processedBuffer = await applyPfpEffects(buffers);
+                    processedBuffer = await applyPfpEffects(buffer, isDuo);
                 } catch (err) {
                     console.error("Failed to apply image effects, using original PFP:", err);
-                    processedBuffer = buffers[0];
+                    processedBuffer = buffer;
                 }
 
                 const fs = require("fs");
