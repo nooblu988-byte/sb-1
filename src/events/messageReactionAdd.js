@@ -3,9 +3,18 @@ const { getTrophyEmoji, getVoteEmoji, getArrowEmoji, getTickEmoji, getCrossEmoji
 
 module.exports = (client) => {
     client.on("messageReactionAdd", async (reaction, user) => {
-        const guild = reaction.message.guild || client.guilds.cache.get(reaction.message.guildId);
-        if (user.bot || !guild) return;
+        if (reaction.message.partial) {
+            try {
+                await reaction.message.fetch();
+            } catch (err) {
+                console.error("Failed to fetch partial message in messageReactionAdd:", err);
+                return;
+            }
+        }
 
+        if (user.bot || !reaction.message.guild) return;
+
+        const guild = reaction.message.guild;
         const guildId = guild.id;
         const messageId = reaction.message.id;
 
