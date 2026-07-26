@@ -493,6 +493,7 @@ module.exports = {
 
                     const filteredVoters = [];
                     let underageCount = 0;
+                    const underageVoters = [];
 
                     for (const voterId of voters) {
                         let voterUser = client.users.cache.get(voterId);
@@ -508,12 +509,39 @@ module.exports = {
                         const ageInDays = (Date.now() - voterUser.createdTimestamp) / (1000 * 60 * 60 * 24);
                         if (ageInDays < 25) {
                             underageCount++;
+                            underageVoters.push(voterId);
                         } else {
                             filteredVoters.push(voterId);
                         }
                     }
 
                     if (underageCount > 0) {
+                        // Remove reactions from the Discord message
+                        if (card.channelId && card.messageId) {
+                            const chan = message.guild.channels.cache.get(card.channelId) || 
+                                         await message.guild.channels.fetch(card.channelId).catch(() => null);
+                            if (chan) {
+                                const msg = await chan.messages.fetch(card.messageId).catch(() => null);
+                                if (msg) {
+                                    const configuredEmoji = getVoteEmoji(client, guildId);
+                                    const reaction = msg.reactions.cache.find(r => {
+                                        const customMatch = configuredEmoji.match(/:(\d+)>$/) || configuredEmoji.match(/^(\d+)$/);
+                                        if (customMatch) {
+                                            return r.emoji.id === customMatch[1];
+                                        }
+                                        return r.emoji.name === configuredEmoji;
+                                    });
+
+                                    if (reaction) {
+                                        for (const voterId of underageVoters) {
+                                            await reaction.users.remove(voterId).catch(() => {});
+                                            client.lmdbDel(`voter_record_${guildId}_${voterId}`);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
                         await client.db.set(voteKey, filteredVoters);
                         client.lmdb.put(voteKey, filteredVoters);
                         totalRemoved += underageCount;
@@ -547,7 +575,7 @@ module.exports = {
                 });
 
                 summaryContent += `\n**Total Underage Votes Removed:** \`${totalRemoved}\`\n` +
-                                  `-# Note: Reactions on Discord messages were not deleted. Only leaderboard and DB scores have been updated.`;
+                                  `-# Note: Reactions of underage accounts on Discord messages have also been removed.`;
 
                 const container = new ContainerBuilder()
                     .setAccentColor(0x26272F)
