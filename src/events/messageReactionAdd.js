@@ -3,21 +3,23 @@ const { getTrophyEmoji, getVoteEmoji, getArrowEmoji, getTickEmoji, getCrossEmoji
 
 module.exports = (client) => {
     client.on("messageReactionAdd", async (reaction, user) => {
-        if (user.bot || !reaction.message.guild) return;
+        const guild = reaction.message.guild || client.guilds.cache.get(reaction.message.guildId);
+        if (user.bot || !guild) return;
 
-        const guildId = reaction.message.guild.id;
+        const guildId = guild.id;
         const messageId = reaction.message.id;
 
         // Fetch card directly from MongoDB for real-time consistency across shards/restarts
         const isCard = await client.db.get(`voting_card_${guildId}_${messageId}`);
         if (!isCard) return;
 
-        if (reaction.partial) {
+        // Fetch user if partial
+        let voter = user;
+        if (voter.partial) {
             try {
-                await reaction.fetch();
+                voter = await client.users.fetch(voter.id);
             } catch (err) {
-                console.error("Failed to fetch partial reaction:", err);
-                return;
+                console.error("Failed to fetch partial user in messageReactionAdd:", err);
             }
         }
 
@@ -34,15 +36,16 @@ module.exports = (client) => {
 
         if (!isEmojiMatch(reaction.emoji, configuredEmoji)) return;
 
-        const accountAgeInDays = (Date.now() - user.createdTimestamp) / (1000 * 60 * 60 * 24);
+        const createdTimestamp = voter.createdTimestamp || Date.now();
+        const accountAgeInDays = (Date.now() - createdTimestamp) / (1000 * 60 * 60 * 24);
 
         const voteKey = `votes_${guildId}_${messageId}`;
         
         // Fetch voters directly from MongoDB
         const voters = (await client.db.get(voteKey)) || [];
 
-        if (!voters.includes(user.id)) {
-            voters.push(user.id);
+        if (!voters.includes(voter.id)) {
+            voters.push(voter.id);
             // Write to MongoDB and keep local LMDB in sync
             await client.db.set(voteKey, voters);
             client.lmdb.put(voteKey, voters);
@@ -52,7 +55,12 @@ module.exports = (client) => {
             const logsChan = client.channels.cache.get(logsId) || 
                              await client.channels.fetch(logsId).catch(() => null);
             if (logsChan) {
-                const avatarUrl = user.displayAvatarURL({ size: 256 });
+                let avatarUrl;
+                try {
+                    avatarUrl = voter.displayAvatarURL({ size: 256 });
+                } catch {
+                    avatarUrl = voter.defaultAvatarURL;
+                }
                 const isUnderage = accountAgeInDays < 25;
                 const warningText = isUnderage ? `\n> **⚠️ Warning:** Account is < 25 days old (\`${accountAgeInDays.toFixed(1)} days\`)` : "";
 
@@ -68,7 +76,7 @@ module.exports = (client) => {
                     .addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small))
                     .addTextDisplayComponents(
                         new TextDisplayBuilder().setContent(
-                            `> **Voter:** ${user} (\`${user.tag}\` / \`${user.id}\`)\n` +
+                            `> **Voter:** ${voter} (\`${voter.tag || voter.id}\` / \`${voter.id}\`)\n` +
                             `> **Voted For Team:** **${isCard.teamName}**\n` +
                             `> **Target Member:** <@${isCard.userId}>\n` +
                             `> **Timestamp:** <t:${Math.floor(Date.now() / 1000)}:T> (<t:${Math.floor(Date.now() / 1000)}:R>)${warningText}`
@@ -83,7 +91,7 @@ module.exports = (client) => {
 
             // Do not await updateLeaderboard to make the reaction response instant and smooth
             const { updateLeaderboard } = require("./messageReactionRemove");
-            updateLeaderboard(client, reaction.message.guild).catch(console.error);
+            updateLeaderboard(client, guild).catch(console.error);
         }
     });
 };
