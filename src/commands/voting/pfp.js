@@ -118,7 +118,7 @@ module.exports = {
                 return message.reply({ content: `${crossEmoji} **Please attach an image file or provide a direct image link.**` });
             }
 
-            const statusMsg = await message.reply({ content: "⏳ **Downloading and processing image with canvas effects...**" });
+            const statusMsg = await message.reply({ content: "⏳ **Downloading and processing image...**" });
 
             try {
                 const convertToPngUrl = (urlStr) => {
@@ -135,14 +135,7 @@ module.exports = {
                 if (!res.ok) throw new Error("PFP download failed");
                 const buffer = await res.buffer();
 
-                let processedBuffer;
-                try {
-                    const { applyPfpEffects } = require("../../utils/imageEffects");
-                    processedBuffer = await applyPfpEffects(buffer);
-                } catch (err) {
-                    console.error("Failed to apply image effects on manual upload, using original PFP:", err);
-                    processedBuffer = buffer;
-                }
+                let processedBuffer = buffer;
 
                 const pfpsDir = path.join(__dirname, "..", "..", "database", "pfps");
                 if (!fs.existsSync(pfpsDir)) {
