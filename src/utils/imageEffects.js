@@ -105,8 +105,8 @@ async function applyPfpEffects(pfpBuffer, isDuo = false) {
     const H = img.height;
     const isPortrait = H > W;
 
-    // Pad the canvas to leave room for the floating stars and sparkles
-    const padding = 80;
+    // Pad the canvas minimally to leave room for the floating stars without shrinking the PFP
+    const padding = 30;
     const canvasW = W + padding * 2;
     const canvasH = H + padding * 2;
 
@@ -127,9 +127,9 @@ async function applyPfpEffects(pfpBuffer, isDuo = false) {
     const borderH = H;
 
     // Floating distances for the stars (spacious gap so they don't overlap the image)
-    const starOffset = 25;
-    const cornerOffset = 20;
-    const shadowOffset = 15;
+    const starOffset = 12;
+    const cornerOffset = 10;
+    const shadowOffset = 8;
 
     // Glowing shining stars sizing
     const baseStarSize = Math.max(4, Math.floor(Math.min(W, H) * 0.025)); // Proportionate star size
