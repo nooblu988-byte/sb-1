@@ -110,75 +110,111 @@ module.exports = (client) => {
         // 🗳️ VOTING REGISTRATION BUTTONS HANDLER
         // ═══════════════════════════════════════════════════════════════
         if (interaction.customId === "voting_reg_single" || interaction.customId === "voting_reg_duo") {
-            const isEnabled = client.lmdbGet(`voting_system_${guildId}`) === "enabled";
-
-            if (!isEnabled) {
-                return interaction.reply({
-                    content: `${crossEmoji} **The voting system is currently disabled by administrators.**`,
-                    flags: 64
-                });
+            // Defer reply immediately with ephemeral: true to prevent "Interaction Failed" timeouts
+            let isDeferred = false;
+            try {
+                await interaction.deferReply({ ephemeral: true });
+                isDeferred = true;
+            } catch (err) {
+                console.error("Failed to defer reply for voting registration:", err);
             }
 
-            const isDuo = interaction.customId === "voting_reg_duo";
-            const participants = client.lmdbGet(`participants_${guildId}`) || [];
-
-            if (participants.includes(interaction.user.id)) {
-                return interaction.reply({
-                    content: `${crossEmoji} **You are already registered for this event!**`,
-                    flags: 64
-                });
-            }
-
-            // Check if there is already an active registration thread for this user
-            const activeRegThreadId = client.lmdbGet(`active_reg_${guildId}_${interaction.user.id}`);
-            if (activeRegThreadId) {
-                const activeThread = interaction.guild.channels.cache.get(activeRegThreadId) || 
-                                     await interaction.guild.channels.fetch(activeRegThreadId).catch(() => null);
-                if (activeThread) {
-                    return interaction.reply({
-                        content: `${crossEmoji} **You already have an active registration thread open!** Please check ${activeThread} to complete your registration first.`,
-                        flags: 64
-                    });
-                } else {
-                    client.lmdbDel(`active_reg_${guildId}_${interaction.user.id}`);
+            const safeReply = async (payload) => {
+                try {
+                    if (isDeferred || interaction.deferred || interaction.replied) {
+                        return await interaction.followUp(payload);
+                    } else {
+                        return await interaction.reply(payload);
+                    }
+                } catch (err) {
+                    console.error("Failed to send interaction response during registration:", err);
                 }
-            }
+            };
 
-            // Create private thread under the registration channel
-            const channel = interaction.channel;
-            const thread = await channel.threads.create({
-                name: `register-${interaction.user.username}`,
-                type: ChannelType.GuildPrivateThread,
-                reason: 'PFP Event Registration Wizard',
-                autoArchiveDuration: 60,
-            }).catch(async (err) => {
-                console.error("Failed to create private thread, trying public thread:", err);
-                return await channel.threads.create({
+            try {
+                const isEnabled = client.lmdbGet(`voting_system_${guildId}`) === "enabled";
+
+                if (!isEnabled) {
+                    return await safeReply({
+                        content: `${crossEmoji} **The voting system is currently disabled by administrators.**`,
+                        ephemeral: true
+                    });
+                }
+
+                const isDuo = interaction.customId === "voting_reg_duo";
+                const participants = client.lmdbGet(`participants_${guildId}`) || [];
+
+                if (participants.includes(interaction.user.id)) {
+                    return await safeReply({
+                        content: `${crossEmoji} **You are already registered for this event!**`,
+                        ephemeral: true
+                    });
+                }
+
+                // Check if there is already an active registration thread for this user
+                const activeRegThreadId = client.lmdbGet(`active_reg_${guildId}_${interaction.user.id}`);
+                if (activeRegThreadId) {
+                    const activeThread = interaction.guild.channels.cache.get(activeRegThreadId) || 
+                                         await interaction.guild.channels.fetch(activeRegThreadId).catch(() => null);
+                    if (activeThread) {
+                        return await safeReply({
+                            content: `${crossEmoji} **You already have an active registration thread open!** Please check ${activeThread} to complete your registration first.`,
+                            ephemeral: true
+                        });
+                    } else {
+                        client.lmdbDel(`active_reg_${guildId}_${interaction.user.id}`);
+                    }
+                }
+
+                // Create private thread under the registration channel
+                const channel = interaction.channel || await interaction.guild.channels.fetch(interaction.channelId).catch(() => null);
+                if (!channel || !channel.threads || typeof channel.threads.create !== "function") {
+                    return await safeReply({
+                        content: `${crossEmoji} **Failed to start registration.** This channel does not support thread creation.`,
+                        ephemeral: true
+                    });
+                }
+
+                const thread = await channel.threads.create({
                     name: `register-${interaction.user.username}`,
-                    type: ChannelType.GuildPublicThread,
+                    type: ChannelType.GuildPrivateThread,
                     reason: 'PFP Event Registration Wizard',
                     autoArchiveDuration: 60,
-                }).catch(() => null);
-            });
+                }).catch(async (err) => {
+                    console.error("Failed to create private thread, trying public thread:", err);
+                    return await channel.threads.create({
+                        name: `register-${interaction.user.username}`,
+                        type: ChannelType.GuildPublicThread,
+                        reason: 'PFP Event Registration Wizard',
+                        autoArchiveDuration: 60,
+                    }).catch(() => null);
+                });
 
-            if (!thread) {
-                return interaction.reply({
-                    content: `${crossEmoji} **Failed to start registration.** Thread creation failed. Ensure the bot has \`Manage Threads\` permissions.`,
-                    flags: 64
+                if (!thread) {
+                    return await safeReply({
+                        content: `${crossEmoji} **Failed to start registration.** Thread creation failed. Ensure the bot has \`Manage Threads\` permissions.`,
+                        ephemeral: true
+                    });
+                }
+
+                // Save active registration thread ID to prevent multiple wizards for the same user
+                client.lmdbSet(`active_reg_${guildId}_${interaction.user.id}`, thread.id);
+
+                await thread.members.add(interaction.user.id).catch(() => {});
+                await safeReply({
+                    content: `${tickEmoji} **Registration started!** Go to the thread ${thread} to complete your registration.`,
+                    ephemeral: true
+                });
+
+                // Start Wizard
+                runRegistrationWizard(client, thread, interaction, isDuo);
+            } catch (err) {
+                console.error("Error handling voting registration click:", err);
+                await safeReply({
+                    content: `${crossEmoji} **An unexpected error occurred:** ${err.message}`,
+                    ephemeral: true
                 });
             }
-
-            // Save active registration thread ID to prevent multiple wizards for the same user
-            client.lmdbSet(`active_reg_${guildId}_${interaction.user.id}`, thread.id);
-
-            await thread.members.add(interaction.user.id).catch(() => {});
-            await interaction.reply({
-                content: `${tickEmoji} **Registration started!** Go to the thread ${thread} to complete your registration.`,
-                flags: 64
-            });
-
-            // Start Wizard
-            runRegistrationWizard(client, thread, interaction, isDuo);
         }
     });
 };
@@ -424,7 +460,7 @@ async function runRegistrationWizard(client, thread, interaction, isDuo) {
                 if (!fs.existsSync(pfpsDir)) {
                     fs.mkdirSync(pfpsDir, { recursive: true });
                 }
-                const filename = `${interaction.guildId}_${interaction.user.id}_${Date.now()}.png`;
+                const filename = `${interaction.guildId}_${interaction.user.id}_${Date.now()}.gif`;
                 const localPath = path.join(pfpsDir, filename);
                 fs.writeFileSync(localPath, processedBuffer);
 
@@ -436,7 +472,7 @@ async function runRegistrationWizard(client, thread, interaction, isDuo) {
                 if (logsChan) {
                     const logMsg = await logsChan.send({
                         content: `📁 **PFP Backup** for Team \`${teamName}\``,
-                        files: [{ attachment: processedBuffer, name: "pfp_event.png" }]
+                        files: [{ attachment: processedBuffer, name: "pfp_event.gif" }]
                     }).catch(() => null);
                     if (logMsg) {
                         finalPfpUrl = logMsg.attachments.first()?.url;
@@ -505,7 +541,7 @@ async function runRegistrationWizard(client, thread, interaction, isDuo) {
                                     )
                                 )
                         ],
-                        files: [{ attachment: processedBuffer, name: "registered_pfp.png" }],
+                        files: [{ attachment: processedBuffer, name: "registered_pfp.gif" }],
                         flags: MessageFlags.IsComponentsV2
                     }).catch(() => {});
                 }
