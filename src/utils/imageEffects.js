@@ -28,9 +28,15 @@ function drawStar(ctx, cx, cy, spikes, outerRadius, innerRadius, color) {
     ctx.closePath();
     ctx.fillStyle = color;
     
-    // Soft, eye-friendly glowing effect (reduced to 8 for comfortable view)
-    ctx.shadowBlur = 8;
-    ctx.shadowColor = color;
+    // Very soft, simple and light glow (comfortable for the eyes)
+    ctx.shadowBlur = 4;
+    if (color === "#FFD700") {
+        ctx.shadowColor = "rgba(255, 215, 0, 0.35)";
+    } else if (color === "#FFFFFF") {
+        ctx.shadowColor = "rgba(255, 255, 255, 0.35)";
+    } else {
+        ctx.shadowColor = color;
+    }
     ctx.fill();
     ctx.shadowBlur = 0; // reset
 }
