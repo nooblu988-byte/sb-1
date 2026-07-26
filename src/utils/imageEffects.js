@@ -79,9 +79,10 @@ async function loadPfpImage(pfpBuffer) {
     } catch (err) {
         console.error("loadImage failed natively, attempting pure-JS conversion with Jimp:", err.message);
         try {
-            const { Jimp } = require("jimp");
+            let Jimp = require("jimp");
+            if (Jimp.Jimp) Jimp = Jimp.Jimp;
             const image = await Jimp.read(finalBuffer);
-            finalBuffer = await image.getBuffer("image/png");
+            finalBuffer = await image.getBufferAsync(Jimp.MIME_PNG || "image/png");
             img = await loadImage(finalBuffer);
             console.log("Successfully converted image to PNG using Jimp!");
         } catch (jimpErr) {
