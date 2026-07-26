@@ -148,7 +148,7 @@ module.exports = {
                 if (!fs.existsSync(pfpsDir)) {
                     fs.mkdirSync(pfpsDir, { recursive: true });
                 }
-                const filename = `${guildId}_${targetUser.id}_${Date.now()}.png`;
+                const filename = `${guildId}_${targetUser.id}_${Date.now()}.gif`;
                 const localPath = path.join(pfpsDir, filename);
                 fs.writeFileSync(localPath, processedBuffer);
 
@@ -160,7 +160,7 @@ module.exports = {
                 if (logsChan) {
                     const logMsg = await logsChan.send({
                         content: `📁 **PFP Backup (Manual Upload)** for Team \`${teamName}\``,
-                        files: [{ attachment: processedBuffer, name: "pfp_event.png" }]
+                        files: [{ attachment: processedBuffer, name: "pfp_event.gif" }]
                     }).catch(() => null);
                     if (logMsg) {
                         finalPfpUrl = logMsg.attachments.first()?.url;
@@ -212,7 +212,7 @@ module.exports = {
                                     )
                                 )
                         ],
-                        files: [{ attachment: processedBuffer, name: "registered_pfp.png" }],
+                        files: [{ attachment: processedBuffer, name: "registered_pfp.gif" }],
                         flags: MessageFlags.IsComponentsV2
                     }).catch(() => {});
                 }
@@ -256,9 +256,9 @@ module.exports = {
                     let fileAttachment;
 
                     if (fs.existsSync(pfpPath)) {
-                        fileAttachment = { attachment: pfpPath, name: `${participant.teamName}_pfp.png` };
+                        fileAttachment = { attachment: pfpPath, name: `${participant.teamName}_pfp.gif` };
                     } else {
-                        fileAttachment = { attachment: participant.pfpUrl, name: `${participant.teamName}_pfp.png` };
+                        fileAttachment = { attachment: participant.pfpUrl, name: `${participant.teamName}_pfp.gif` };
                     }
 
                     teamCounter++;
@@ -352,9 +352,9 @@ module.exports = {
                 let fileAttachment;
 
                 if (fs.existsSync(pfpPath)) {
-                    fileAttachment = { attachment: pfpPath, name: `${participant.teamName}_pfp.png` };
+                    fileAttachment = { attachment: pfpPath, name: `${participant.teamName}_pfp.gif` };
                 } else {
-                    fileAttachment = { attachment: participant.pfpUrl, name: `${participant.teamName}_pfp.png` };
+                    fileAttachment = { attachment: participant.pfpUrl, name: `${participant.teamName}_pfp.gif` };
                 }
 
                 let dropContent = `## **TEAM 1:- ${participant.teamName}**\n`;
