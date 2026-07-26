@@ -408,7 +408,7 @@ async function runRegistrationWizard(client, thread, interaction, isDuo) {
                 return;
             }
 
-            const loadingMsg = await thread.send({ content: "⚙️ **Downloading PFP, applying glowing border and shining stars effects...**" });
+            const loadingMsg = await thread.send({ content: "⚙️ **Downloading and processing PFP...**" });
 
             try {
                 const fetch = (...args) => import("node-fetch").then(({ default: fetch }) => fetch(...args));
@@ -440,13 +440,10 @@ async function runRegistrationWizard(client, thread, interaction, isDuo) {
                             headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" }
                         });
                         if (!res.ok) throw new Error("PFP download failed");
-                        const buffer = await res.buffer();
-                        
-                        const { applyPfpEffects } = require("../utils/imageEffects");
-                        processedBuffer = await applyPfpEffects(buffer, isDuo);
+                        processedBuffer = await res.buffer();
                     }
                 } catch (err) {
-                    console.error("Failed to apply image effects, using original/first PFP:", err);
+                    console.error("Failed to process PFP, using original/first PFP:", err);
                     // Fallback to first image buffer
                     const res = await fetch(pfpUrl, {
                         headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" }
