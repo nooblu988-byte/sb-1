@@ -202,6 +202,8 @@ module.exports = (client) => {
 
         if (voters.includes(voter.id)) {
             voters = voters.filter(id => id !== voter.id);
+            // Remove their voting record so they can vote for another card
+            client.lmdbDel(`voter_record_${guildId}_${voter.id}`);
             // Write to LMDB synchronously to prevent race conditions
             client.lmdb.putSync(voteKey, voters);
             // Sync to MongoDB sequentially in the background to prevent out-of-order writes
