@@ -1,4 +1,4 @@
-const { createState, createCanvas, loadImage } = require("@napi-rs/canvas");
+const { createCanvas, loadImage } = require("@napi-rs/canvas");
 const GIFEncoder = require("gif-encoder-2");
 const fs = require("fs");
 const path = require("path");
@@ -33,8 +33,8 @@ function drawStar(ctx, cx, cy, spikes, outerRadius, innerRadius, color, angle = 
     ctx.closePath();
     ctx.fillStyle = color;
     
-    // Lighter, glitter glowing effect
-    ctx.shadowBlur = 6;
+    // Intense glowing effect (restored to 12 from 6)
+    ctx.shadowBlur = 12;
     ctx.shadowColor = color;
     ctx.fill();
     ctx.restore();
@@ -52,7 +52,7 @@ function roundRect(ctx, x, y, width, height, radius) {
     ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
     ctx.lineTo(x + radius, y + height);
     ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
-    ctx.lineTo(x + radius, y + radius);
+    ctx.lineTo(x, y + radius);
     ctx.quadraticCurveTo(x, y, x + radius, y);
     ctx.closePath();
 }
@@ -111,9 +111,10 @@ async function applyPfpEffects(pfpBuffer, isDuo = false) {
     // Keep the original image dimensions exactly as requested
     const W = img.width;
     const H = img.height;
+    const isPortrait = H > W;
 
-    // Pad the canvas minimally to leave room for the floating stars without shrinking the PFP
-    const padding = 30;
+    // We pad the canvas by 65px on each side (total 130px) to allow room for the outer border (18px offset) and star shadows
+    const padding = 65;
     const canvasW = W + padding * 2;
     const canvasH = H + padding * 2;
 
@@ -128,63 +129,139 @@ async function applyPfpEffects(pfpBuffer, isDuo = false) {
     const canvas = createCanvas(canvasW, canvasH);
     const ctx = canvas.getContext("2d");
 
-    const borderX = padding;
-    const borderY = padding;
-    const borderW = W;
-    const borderH = H;
+    const borderX = padding - 18; // Make it 18px outside the image (beautiful spacious gap)
+    const borderY = padding - 18;
+    const borderW = W + 36;
+    const borderH = H + 36;
+    const borderRadius = Math.max(16, Math.floor(Math.min(W, H) * 0.08) + 6);
 
-    // Floating distances for the stars
-    const starOffset = 12;
-    const cornerOffset = 10;
-    const shadowOffset = 8;
-
-    // Glowing shining stars sizing
-    const baseStarSize = Math.max(5, Math.floor(Math.min(W, H) * 0.028));
+    // Glowing shining stars sizing (restored exact proportions from version 11)
+    const baseStarSize = Math.max(4, Math.floor(Math.min(W, H) * 0.025)); // Proportionate star size
     const lgStarOuter = baseStarSize * 1.4;
-    const lgStarInner = lgStarOuter * 0.18; // Glitter style (narrow waist)
+    const lgStarInner = lgStarOuter * 0.4;
     const smStarOuter = baseStarSize * 0.6;
-    const smStarInner = smStarOuter * 0.15; // Glitter style (narrow waist)
+    const smStarInner = smStarOuter * 0.35;
+
+    // Adapt star offsets dynamically to prevent clipping on compact portrait padding
+    const starOffset = isPortrait ? 10 : 15;
+    const cornerOffset = isPortrait ? 8 : 12;
+    const shadowOffset = isPortrait ? 6 : 8;
 
     // Build static parameters for the stars, assigning unique phase offsets to animate them out of sync
     const stars = [
         // Middle Edges
         { cx: borderX - starOffset, cy: borderY + borderH / 2, spikes: 4, outer: lgStarOuter, inner: lgStarInner, color: "#FFD700", phase: 0 },
         { cx: borderX + borderW + starOffset, cy: borderY + borderH / 2, spikes: 4, outer: lgStarOuter, inner: lgStarInner, color: "#FFFFFF", phase: Math.PI / 2 },
-        { cx: borderX + borderW / 2, cy: borderY - starOffset, spikes: 4, outer: lgStarOuter, inner: lgStarInner, color: "#FFD700", phase: Math.PI },
-        { cx: borderX + borderW / 2, cy: borderY + borderH + starOffset, spikes: 4, outer: lgStarOuter, inner: lgStarInner, color: "#FFFFFF", phase: (3 * Math.PI) / 2 },
 
-        // Corners
-        { cx: borderX - cornerOffset, cy: borderY - cornerOffset, spikes: 4, outer: lgStarOuter * 1.2, inner: lgStarInner * 1.2, color: "#FFFFFF", phase: Math.PI / 4 },
-        { cx: borderX + borderW + cornerOffset, cy: borderY - cornerOffset, spikes: 4, outer: lgStarOuter * 1.2, inner: lgStarInner * 1.2, color: "#FFD700", phase: (3 * Math.PI) / 4 },
-        { cx: borderX - cornerOffset, cy: borderY + borderH + cornerOffset, spikes: 4, outer: lgStarOuter * 1.2, inner: lgStarInner * 1.2, color: "#FFD700", phase: (5 * Math.PI) / 4 },
-        { cx: borderX + borderW + cornerOffset, cy: borderY + borderH + cornerOffset, spikes: 4, outer: lgStarOuter * 1.2, inner: lgStarInner * 1.2, color: "#FFFFFF", phase: (7 * Math.PI) / 4 },
+        // Corners (Floating outside diagonally)
+        // Top-Left (Large White)
+        { cx: borderX - cornerOffset, cy: borderY - cornerOffset, spikes: 4, outer: lgStarOuter * 1.33, inner: lgStarInner * 1.33, color: "#FFFFFF", phase: Math.PI / 4 },
+        // Top-Right (Large Gold)
+        { cx: borderX + borderW + cornerOffset, cy: borderY - cornerOffset, spikes: 4, outer: lgStarOuter * 1.33, inner: lgStarInner * 1.33, color: "#FFD700", phase: (3 * Math.PI) / 4 },
+        // Bottom-Left (Large Gold)
+        { cx: borderX - cornerOffset, cy: borderY + borderH + cornerOffset, spikes: 4, outer: lgStarOuter * 1.33, inner: lgStarInner * 1.33, color: "#FFD700", phase: (5 * Math.PI) / 4 },
+        // Bottom-Right (Large White)
+        { cx: borderX + borderW + cornerOffset, cy: borderY + borderH + cornerOffset, spikes: 4, outer: lgStarOuter * 1.33, inner: lgStarInner * 1.33, color: "#FFFFFF", phase: (7 * Math.PI) / 4 },
 
-        // Sparkles
+        // Left/Right sparkles
         { cx: borderX - shadowOffset, cy: borderY + borderH * 0.3, spikes: 4, outer: smStarOuter, inner: smStarInner, color: "#FFFFFF", phase: Math.PI / 3 },
         { cx: borderX - shadowOffset, cy: borderY + borderH * 0.7, spikes: 4, outer: smStarOuter, inner: smStarInner, color: "#FFD700", phase: (4 * Math.PI) / 3 },
         { cx: borderX + borderW + shadowOffset, cy: borderY + borderH * 0.3, spikes: 4, outer: smStarOuter, inner: smStarInner, color: "#FFD700", phase: (2 * Math.PI) / 3 },
-        { cx: borderX + borderW + shadowOffset, cy: borderY + borderH * 0.7, spikes: 4, outer: smStarOuter, inner: smStarInner, color: "#FFFFFF", phase: (5 * Math.PI) / 3 },
-
-        // Top/Bottom sparkles
-        { cx: borderX + borderW * 0.3, cy: borderY - shadowOffset, spikes: 4, outer: smStarOuter, inner: smStarInner, color: "#FFFFFF", phase: Math.PI / 6 },
-        { cx: borderX + borderW * 0.7, cy: borderY - shadowOffset, spikes: 4, outer: smStarOuter, inner: smStarInner, color: "#FFD700", phase: (7 * Math.PI) / 6 },
-        { cx: borderX + borderW * 0.3, cy: borderY + borderH + shadowOffset, spikes: 4, outer: smStarOuter, inner: smStarInner, color: "#FFD700", phase: (5 * Math.PI) / 6 },
-        { cx: borderX + borderW * 0.7, cy: borderY + borderH + shadowOffset, spikes: 4, outer: smStarOuter, inner: smStarInner, color: "#FFFFFF", phase: (11 * Math.PI) / 6 }
+        { cx: borderX + borderW + shadowOffset, cy: borderY + borderH * 0.7, spikes: 4, outer: smStarOuter, inner: smStarInner, color: "#FFFFFF", phase: (5 * Math.PI) / 3 }
     ];
+
+    if (!isDuo) {
+        stars.push(
+            // Top Middle (Gold)
+            { cx: borderX + borderW / 2, cy: borderY - starOffset, spikes: 4, outer: lgStarOuter, inner: lgStarInner, color: "#FFD700", phase: Math.PI },
+            // Bottom Middle (White)
+            { cx: borderX + borderW / 2, cy: borderY + borderH + starOffset, spikes: 4, outer: lgStarOuter, inner: lgStarInner, color: "#FFFFFF", phase: (3 * Math.PI) / 2 },
+
+            // Top/Bottom sparkles
+            { cx: borderX + borderW * 0.3, cy: borderY - shadowOffset, spikes: 4, outer: smStarOuter, inner: smStarInner, color: "#FFFFFF", phase: Math.PI / 6 },
+            { cx: borderX + borderW * 0.7, cy: borderY - shadowOffset, spikes: 4, outer: smStarOuter, inner: smStarInner, color: "#FFD700", phase: (7 * Math.PI) / 6 },
+            { cx: borderX + borderW * 0.3, cy: borderY + borderH + shadowOffset, spikes: 4, outer: smStarOuter, inner: smStarInner, color: "#FFD700", phase: (5 * Math.PI) / 6 },
+            { cx: borderX + borderW * 0.7, cy: borderY + borderH + shadowOffset, spikes: 4, outer: smStarOuter, inner: smStarInner, color: "#FFFFFF", phase: (11 * Math.PI) / 6 }
+        );
+    }
 
     for (let f = 0; f < totalFrames; f++) {
         // Clear frame
         ctx.clearRect(0, 0, canvasW, canvasH);
 
-        // Draw original PFP (no resizing, no scaling)
+        // 1. Draw a soft, attractive glowing shadow behind the main box
+        ctx.save();
+        ctx.shadowColor = "rgba(255, 0, 127, 0.25)";
+        ctx.shadowBlur = 15;
+        roundRect(ctx, borderX, borderY, borderW, borderH, borderRadius);
+        ctx.fillStyle = "rgba(10, 10, 15, 0.85)";
+        ctx.fill();
+        ctx.restore();
+
+        // 2. Draw the clipped PFP
+        ctx.save();
+        const imageRadius = Math.max(8, borderRadius - 8);
+        roundRect(ctx, padding, padding, W, H, imageRadius);
+        ctx.clip();
         ctx.drawImage(img, padding, padding, W, H);
+        ctx.restore();
 
+        // 3. Draw a soft neon gradient border with a strong neon glow around the outer boundary
+        ctx.save();
+        const grad = ctx.createLinearGradient(borderX, borderY, borderX + borderW, borderY + borderH);
+        grad.addColorStop(0, "#FF007F");   // Neon Pink
+        grad.addColorStop(0.33, "#7F00FF"); // Purple
+        grad.addColorStop(0.66, "#00F0FF"); // Cyan
+        grad.addColorStop(1, "#FFD700");   // Gold
+        ctx.strokeStyle = grad;
+
+        function strokeBorder(ctx) {
+            if (isDuo) {
+                // Draw left side border path (top-left rounded corner, left line, bottom-left rounded corner)
+                ctx.beginPath();
+                ctx.moveTo(borderX + borderRadius, borderY);
+                ctx.quadraticCurveTo(borderX, borderY, borderX, borderY + borderRadius);
+                ctx.lineTo(borderX, borderY + borderH - borderRadius);
+                ctx.quadraticCurveTo(borderX, borderY + borderH, borderX + borderRadius, borderY + borderH);
+                ctx.stroke();
+
+                // Draw right side border path (top-right rounded corner, right line, bottom-right rounded corner)
+                ctx.beginPath();
+                ctx.moveTo(borderX + borderW - borderRadius, borderY);
+                ctx.quadraticCurveTo(borderX + borderW, borderY, borderX + borderW, borderY + borderRadius);
+                ctx.lineTo(borderX + borderW, borderY + borderH - borderRadius);
+                ctx.quadraticCurveTo(borderX + borderW, borderY + borderH, borderX + borderW - borderRadius, borderY + borderH);
+                ctx.stroke();
+            } else {
+                roundRect(ctx, borderX, borderY, borderW, borderH, borderRadius);
+                ctx.stroke();
+            }
+        }
+
+        // Draw first pass with a wide, soft cyan/purple glow
+        ctx.shadowColor = "rgba(0, 240, 255, 0.6)";
+        ctx.shadowBlur = 25;
+        ctx.lineWidth = 6;
+        strokeBorder(ctx);
+
+        // Draw second pass with a tight, hot pink glow for a realistic neon core look
+        ctx.shadowColor = "rgba(255, 0, 127, 0.85)";
+        ctx.shadowBlur = 12;
+        ctx.lineWidth = 5;
+        strokeBorder(ctx);
+
+        // Draw third pass without glow to keep the gradient border sharp
+        ctx.shadowBlur = 0;
+        ctx.lineWidth = 4;
+        strokeBorder(ctx);
+
+        ctx.restore();
+
+        // 4. Draw glittering stars
         const progress = (f / totalFrames) * 2 * Math.PI;
-
-        // Draw glittering stars
         for (const star of stars) {
-            // Pulse the star scale (between 0.45 and 1.15)
-            const scale = 0.8 + 0.35 * Math.sin(progress + star.phase);
+            // Pulse the star scale (between 0.65 and 1.25)
+            const scale = 0.95 + 0.3 * Math.sin(progress + star.phase);
             // Rotate the star
             const angle = progress * 0.25 + star.phase;
 
@@ -209,15 +286,15 @@ async function applyDuoPfpEffects(pfpBuffer1, pfpBuffer2) {
     const img1 = await loadPfpImage(pfpBuffer1);
     const img2 = await loadPfpImage(pfpBuffer2);
 
-    // 2. Set target size for each avatar (keep 1024x1024 from original code, but generate GIF efficiently)
-    const W = 1024;
-    const H = 1024;
-    const gap = 48;
+    // 2. Set target size for each avatar (normalize to 512x512, exactly from version 11)
+    const W = 512;
+    const H = 512;
+    const gap = 24;
 
     const combinedW = W * 2 + gap;
     const combinedH = H;
 
-    const padding = 130;
+    const padding = 65;
     const canvasW = combinedW + padding * 2;
     const canvasH = combinedH + padding * 2;
 
@@ -232,35 +309,44 @@ async function applyDuoPfpEffects(pfpBuffer1, pfpBuffer2) {
     const canvas = createCanvas(canvasW, canvasH);
     const ctx = canvas.getContext("2d");
 
-    const borderX = padding - 36;
-    const borderY = padding - 36;
-    const borderW = combinedW + 72;
-    const borderH = combinedH + 72;
-    const borderRadius = 92;
-    const imageRadius = Math.max(16, borderRadius - 16);
+    const borderX = padding - 18;
+    const borderY = padding - 18;
+    const borderW = combinedW + 36;
+    const borderH = combinedH + 36;
+    const borderRadius = 46;
+    const imageRadius = Math.max(8, borderRadius - 8);
 
-    const baseStarSize = Math.max(8, Math.floor(Math.min(W, H) * 0.025));
+    // Glowing shining stars sizing (restored exact proportions from version 11)
+    const baseStarSize = Math.max(4, Math.floor(Math.min(W, H) * 0.025)); // Proportionate star size (approx 12)
     const lgStarOuter = baseStarSize * 1.4;
-    const lgStarInner = lgStarOuter * 0.18; // Glitter style (narrow waist)
+    const lgStarInner = lgStarOuter * 0.4;
     const smStarOuter = baseStarSize * 0.6;
-    const smStarInner = smStarOuter * 0.15; // Glitter style (narrow waist)
+    const smStarInner = smStarOuter * 0.35;
 
-    const starOffset = 30;
-    const cornerOffset = 24;
-    const shadowOffset = 16;
+    const starOffset = 15;
+    const cornerOffset = 12;
+    const shadowOffset = 8;
 
-    // Define borders stars parameters
+    // Define borders stars parameters (exactly from version 11)
     const stars = [
-        // Corners
-        { cx: borderX - cornerOffset, cy: borderY - cornerOffset, spikes: 4, outer: lgStarOuter * 1.2, inner: lgStarInner * 1.2, color: "#FFFFFF", phase: Math.PI / 4 },
-        { cx: borderX + borderW + cornerOffset, cy: borderY - cornerOffset, spikes: 4, outer: lgStarOuter * 1.2, inner: lgStarInner * 1.2, color: "#FFD700", phase: (3 * Math.PI) / 4 },
-        { cx: borderX - cornerOffset, cy: borderY + borderH + cornerOffset, spikes: 4, outer: lgStarOuter * 1.2, inner: lgStarInner * 1.2, color: "#FFD700", phase: (5 * Math.PI) / 4 },
-        { cx: borderX + borderW + cornerOffset, cy: borderY + borderH + cornerOffset, spikes: 4, outer: lgStarOuter * 1.2, inner: lgStarInner * 1.2, color: "#FFFFFF", phase: (7 * Math.PI) / 4 },
+        // Corners (Floating outside diagonally)
+        // Top-Left (Large White)
+        { cx: borderX - cornerOffset, cy: borderY - cornerOffset, spikes: 4, outer: lgStarOuter * 1.33, inner: lgStarInner * 1.33, color: "#FFFFFF", phase: Math.PI / 4 },
+        // Top-Right (Large Gold)
+        { cx: borderX + borderW + cornerOffset, cy: borderY - cornerOffset, spikes: 4, outer: lgStarOuter * 1.33, inner: lgStarInner * 1.33, color: "#FFD700", phase: (3 * Math.PI) / 4 },
+        // Bottom-Left (Large Gold)
+        { cx: borderX - cornerOffset, cy: borderY + borderH + cornerOffset, spikes: 4, outer: lgStarOuter * 1.33, inner: lgStarInner * 1.33, color: "#FFD700", phase: (5 * Math.PI) / 4 },
+        // Bottom-Right (Large White)
+        { cx: borderX + borderW + cornerOffset, cy: borderY + borderH + cornerOffset, spikes: 4, outer: lgStarOuter * 1.33, inner: lgStarInner * 1.33, color: "#FFFFFF", phase: (7 * Math.PI) / 4 },
 
         // Middle Edges
+        // Left Middle (Gold)
         { cx: borderX - starOffset, cy: borderY + borderH / 2, spikes: 4, outer: lgStarOuter, inner: lgStarInner, color: "#FFD700", phase: 0 },
+        // Right Middle (White)
         { cx: borderX + borderW + starOffset, cy: borderY + borderH / 2, spikes: 4, outer: lgStarOuter, inner: lgStarInner, color: "#FFFFFF", phase: Math.PI / 2 },
+        // Top Middle (Gold) - Above the divider
         { cx: borderX + borderW / 2, cy: borderY - starOffset, spikes: 4, outer: lgStarOuter, inner: lgStarInner, color: "#FFD700", phase: Math.PI },
+        // Bottom Middle (White) - Below the divider
         { cx: borderX + borderW / 2, cy: borderY + borderH + starOffset, spikes: 4, outer: lgStarOuter, inner: lgStarInner, color: "#FFFFFF", phase: (3 * Math.PI) / 2 },
 
         // Sparkles
@@ -282,7 +368,7 @@ async function applyDuoPfpEffects(pfpBuffer1, pfpBuffer2) {
         // 3. Draw a soft, attractive glowing shadow behind the main box
         ctx.save();
         ctx.shadowColor = "rgba(255, 0, 127, 0.25)";
-        ctx.shadowBlur = 30;
+        ctx.shadowBlur = 15;
         roundRect(ctx, borderX, borderY, borderW, borderH, borderRadius);
         ctx.fillStyle = "rgba(10, 10, 15, 0.85)";
         ctx.fill();
@@ -313,38 +399,43 @@ async function applyDuoPfpEffects(pfpBuffer1, pfpBuffer2) {
         ctx.strokeStyle = grad;
 
         function strokeBorder(ctx) {
+            // Draw the outer border enclosing both images
             roundRect(ctx, borderX, borderY, borderW, borderH, borderRadius);
             ctx.stroke();
 
+            // Draw a vertical divider line between the two PFPs
             const middleX = borderX + borderW / 2;
             ctx.beginPath();
-            ctx.moveTo(middleX, borderY + 30);
-            ctx.lineTo(middleX, borderY + borderH - 30);
+            ctx.moveTo(middleX, borderY + 15);
+            ctx.lineTo(middleX, borderY + borderH - 15);
             ctx.stroke();
         }
 
         // Draw first pass with a wide, soft cyan/purple glow
         ctx.shadowColor = "rgba(0, 240, 255, 0.6)";
-        ctx.shadowBlur = 50;
-        ctx.lineWidth = 12;
+        ctx.shadowBlur = 25;
+        ctx.lineWidth = 6;
         strokeBorder(ctx);
 
-        // Draw second pass with a tight, hot pink glow
+        // Draw second pass with a tight, hot pink glow for a realistic neon core look
         ctx.shadowColor = "rgba(255, 0, 127, 0.85)";
-        ctx.shadowBlur = 24;
-        ctx.lineWidth = 10;
+        ctx.shadowBlur = 12;
+        ctx.lineWidth = 5;
         strokeBorder(ctx);
 
         // Draw third pass without glow to keep the gradient border sharp
         ctx.shadowBlur = 0;
-        ctx.lineWidth = 8;
+        ctx.lineWidth = 4;
         strokeBorder(ctx);
+
         ctx.restore();
 
         // 6. Draw glittering stars
         const progress = (f / totalFrames) * 2 * Math.PI;
         for (const star of stars) {
-            const scale = 0.8 + 0.35 * Math.sin(progress + star.phase);
+            // Pulse the star scale
+            const scale = 0.95 + 0.3 * Math.sin(progress + star.phase);
+            // Rotate the star
             const angle = progress * 0.25 + star.phase;
 
             drawStar(ctx, star.cx, star.cy, star.spikes, star.outer, star.inner, star.color, angle, scale);
