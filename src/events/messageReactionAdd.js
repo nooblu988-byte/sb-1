@@ -1,6 +1,25 @@
 const { ContainerBuilder, TextDisplayBuilder, SectionBuilder, ThumbnailBuilder, SeparatorBuilder, SeparatorSpacingSize, MessageFlags } = require("discord.js");
 const { getTrophyEmoji, getVoteEmoji, getArrowEmoji, getTickEmoji, getCrossEmoji } = require("../utils/votingHelper");
 
+const mongoWriteQueues = new Map(); // key -> Promise
+
+function queueMongoWrite(client, key, value) {
+    let queue = mongoWriteQueues.get(key) || Promise.resolve();
+    queue = queue.then(async () => {
+        await client.db.set(key, value);
+    }).catch(err => {
+        console.error(`MongoDB write error for key ${key}:`, err);
+    });
+    mongoWriteQueues.set(key, queue);
+    
+    // Cleanup queue when done to avoid memory leaks
+    queue.finally(() => {
+        if (mongoWriteQueues.get(key) === queue) {
+            mongoWriteQueues.delete(key);
+        }
+    });
+}
+
 module.exports = (client) => {
     client.on("messageReactionAdd", async (reaction, user) => {
         if (reaction.message.partial) {
@@ -63,8 +82,8 @@ module.exports = (client) => {
             voters.push(voter.id);
             // Write to LMDB synchronously to prevent race conditions
             client.lmdb.putSync(voteKey, voters);
-            // Sync to MongoDB asynchronously in the background
-            client.db.set(voteKey, voters).catch(err => console.error("Failed to sync vote to MongoDB:", err));
+            // Sync to MongoDB sequentially in the background to prevent out-of-order writes
+            queueMongoWrite(client, voteKey, voters);
 
             const logsId = client.lmdbGet(`voting_logs_channel_${guildId}`) || 
                            client.lmdbGet(`logging_cfg_${guildId}`)?.voting;
