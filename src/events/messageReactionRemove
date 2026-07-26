@@ -4,26 +4,26 @@ const { getTrophyEmoji, getVoteEmoji, getArrowEmoji, getTickEmoji, getCrossEmoji
 async function updateLeaderboard(client, guild) {
     const guildId = guild.id;
     
-    // Fetch leaderboard channel directly from MongoDB
-    const leaderboardChanId = await client.db.get(`voting_leaderboard_channel_${guildId}`);
+    // Fetch leaderboard channel directly from LMDB/MongoDB
+    const leaderboardChanId = client.lmdbGet(`voting_leaderboard_channel_${guildId}`);
     if (!leaderboardChanId) return;
 
     const channel = guild.channels.cache.get(leaderboardChanId) || 
                     await guild.channels.fetch(leaderboardChanId).catch(() => null);
     if (!channel) return;
 
-    // Get all active voting cards from MongoDB
-    const cards = (await client.db.get(`voting_cards_${guildId}`)) || [];
+    // Get all active voting cards from LMDB/MongoDB
+    const cards = client.lmdbGet(`voting_cards_${guildId}`) || [];
     if (cards.length === 0) return;
 
-    // Map cards to include vote count from MongoDB
-    const standings = await Promise.all(cards.map(async card => {
-        const voters = (await client.db.get(`votes_${guildId}_${card.messageId}`)) || [];
+    // Map cards to include vote count from LMDB
+    const standings = cards.map(card => {
+        const voters = client.lmdbGet(`votes_${guildId}_${card.messageId}`) || [];
         return {
             ...card,
             votes: voters.length
         };
-    }));
+    });
 
     // Sort by vote count descending
     standings.sort((a, b) => b.votes - a.votes);
@@ -47,8 +47,8 @@ async function updateLeaderboard(client, guild) {
             new TextDisplayBuilder().setContent(leaderboardContent)
         );
 
-    // Check if we have an existing leaderboard message in MongoDB
-    const msgId = await client.db.get(`voting_leaderboard_msg_${guildId}`);
+    // Check if we have an existing leaderboard message in LMDB
+    const msgId = client.lmdbGet(`voting_leaderboard_msg_${guildId}`);
     let existingMsg = null;
     if (msgId) {
         existingMsg = await channel.messages.fetch(msgId).catch(() => null);
@@ -65,42 +65,26 @@ async function updateLeaderboard(client, guild) {
             flags: MessageFlags.IsComponentsV2
         }).catch(() => null);
         if (newMsg) {
-            await client.db.set(`voting_leaderboard_msg_${guildId}`, newMsg.id);
-            client.lmdb.put(`voting_leaderboard_msg_${guildId}`, newMsg.id);
+            client.lmdbSet(`voting_leaderboard_msg_${guildId}`, newMsg.id);
         }
     }
 }
 
 module.exports = (client) => {
     client.on("messageReactionRemove", async (reaction, user) => {
-        if (reaction.message.partial) {
-            try {
-                await reaction.message.fetch();
-            } catch (err) {
-                console.error("Failed to fetch partial message in messageReactionRemove:", err);
-                return;
-            }
-        }
+        if (user.bot) return;
 
-        if (user.bot || !reaction.message.guild) return;
+        const guildId = reaction.message.guildId;
+        if (!guildId) return;
 
-        const guild = reaction.message.guild;
-        const guildId = guild.id;
+        const guild = reaction.message.guild || client.guilds.cache.get(guildId);
+        if (!guild) return;
+
         const messageId = reaction.message.id;
 
-        // Fetch card metadata directly from MongoDB
-        const isCard = await client.db.get(`voting_card_${guildId}_${messageId}`);
+        // Fetch card metadata directly from LMDB instantly
+        const isCard = client.lmdbGet(`voting_card_${guildId}_${messageId}`);
         if (!isCard) return;
-
-        // Fetch user if partial
-        let voter = user;
-        if (voter.partial) {
-            try {
-                voter = await client.users.fetch(voter.id);
-            } catch (err) {
-                console.error("Failed to fetch partial user in messageReactionRemove:", err);
-            }
-        }
 
         const configuredEmoji = getVoteEmoji(client, guildId);
 
@@ -117,53 +101,66 @@ module.exports = (client) => {
 
         const voteKey = `votes_${guildId}_${messageId}`;
         
-        // Fetch voters directly from MongoDB
-        let voters = (await client.db.get(voteKey)) || [];
+        // Fetch voters from LMDB instantly
+        let voters = client.lmdbGet(voteKey) || [];
 
-        if (voters.includes(voter.id)) {
-            voters = voters.filter(id => id !== voter.id);
-            // Write to MongoDB and keep local LMDB in sync
-            await client.db.set(voteKey, voters);
+        if (voters.includes(user.id)) {
+            voters = voters.filter(id => id !== user.id);
+            
+            // Write to LMDB and update MongoDB in background
             client.lmdb.put(voteKey, voters);
+            client.db.set(voteKey, voters).catch(() => {});
 
-            const logsId = client.lmdbGet(`voting_logs_channel_${guildId}`) || 
-                           client.lmdbGet(`logging_cfg_${guildId}`)?.voting;
-            const logsChan = client.channels.cache.get(logsId) || 
-                             await client.channels.fetch(logsId).catch(() => null);
-            if (logsChan) {
-                let avatarUrl;
-                try {
-                    avatarUrl = voter.displayAvatarURL({ size: 256 });
-                } catch {
-                    avatarUrl = voter.defaultAvatarURL;
-                }
-                const container = new ContainerBuilder()
-                    .setAccentColor(0xE74C3C)
-                    .addSectionComponents(
-                        new SectionBuilder()
-                            .addTextDisplayComponents(
-                                new TextDisplayBuilder().setContent(`## ➖ Vote Retracted`)
-                            )
-                            .setThumbnailAccessory(new ThumbnailBuilder().setURL(avatarUrl))
-                    )
-                    .addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small))
-                    .addTextDisplayComponents(
-                        new TextDisplayBuilder().setContent(
-                            `> **Voter:** ${voter} (\`${voter.tag || voter.id}\` / \`${voter.id}\`)\n` +
-                            `> **Removed Vote From:** **${isCard.teamName}**\n` +
-                            `> **Target Member:** <@${isCard.userId}>\n` +
-                            `> **Timestamp:** <t:${Math.floor(Date.now() / 1000)}:T> (<t:${Math.floor(Date.now() / 1000)}:R>)`
-                        )
-                    );
-
-                await logsChan.send({
-                    components: [container],
-                    flags: MessageFlags.IsComponentsV2
-                }).catch(() => {});
-            }
-
-            // Do not await updateLeaderboard to make reaction response instant and smooth
+            // Update leaderboard in background without blocking
             updateLeaderboard(client, guild).catch(console.error);
+
+            // Fetch user (if partial) and send logs asynchronously in the background
+            (async () => {
+                let voter = client.users.cache.get(user.id) || user;
+                if (voter.partial) {
+                    try {
+                        voter = await client.users.fetch(voter.id);
+                    } catch (err) {
+                        console.error("Failed to fetch partial user in background:", err);
+                    }
+                }
+
+                const logsId = client.lmdbGet(`voting_logs_channel_${guildId}`) || 
+                               client.lmdbGet(`logging_cfg_${guildId}`)?.voting;
+                const logsChan = client.channels.cache.get(logsId) || 
+                                 await client.channels.fetch(logsId).catch(() => null);
+                if (logsChan) {
+                    let avatarUrl;
+                    try {
+                        avatarUrl = voter.displayAvatarURL({ size: 256 });
+                    } catch {
+                        avatarUrl = voter.defaultAvatarURL;
+                    }
+                    const container = new ContainerBuilder()
+                        .setAccentColor(0xE74C3C)
+                        .addSectionComponents(
+                            new SectionBuilder()
+                                .addTextDisplayComponents(
+                                    new TextDisplayBuilder().setContent(`## ➖ Vote Retracted`)
+                                )
+                                .setThumbnailAccessory(new ThumbnailBuilder().setURL(avatarUrl))
+                        )
+                        .addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small))
+                        .addTextDisplayComponents(
+                            new TextDisplayBuilder().setContent(
+                                `> **Voter:** ${voter} (\`${voter.tag || voter.id}\` / \`${voter.id}\`)\n` +
+                                `> **Removed Vote From:** **${isCard.teamName}**\n` +
+                                `> **Target Member:** <@${isCard.userId}>\n` +
+                                `> **Timestamp:** <t:${Math.floor(Date.now() / 1000)}:T> (<t:${Math.floor(Date.now() / 1000)}:R>)`
+                            )
+                        );
+
+                    await logsChan.send({
+                        components: [container],
+                        flags: MessageFlags.IsComponentsV2
+                    }).catch(() => {});
+                }
+            })().catch(console.error);
         }
     });
 };
