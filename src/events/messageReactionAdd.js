@@ -75,11 +75,22 @@ module.exports = (client) => {
 
         const voteKey = `votes_${guildId}_${messageId}`;
         
+        // Check if the user has already voted on any card in this guild
+        const voterRecordKey = `voter_record_${guildId}_${voter.id}`;
+        const alreadyVotedMsgId = client.lmdbGet(voterRecordKey);
+        if (alreadyVotedMsgId && alreadyVotedMsgId !== messageId) {
+            // Remove the user's reaction automatically since they can only vote for one card
+            await reaction.users.remove(voter.id).catch(() => {});
+            return;
+        }
+
         // Fetch voters synchronously from LMDB
         const voters = client.lmdbGet(voteKey) || [];
 
         if (!voters.includes(voter.id)) {
             voters.push(voter.id);
+            // Save the voting record
+            client.lmdbSet(voterRecordKey, messageId);
             // Write to LMDB synchronously to prevent race conditions
             client.lmdb.putSync(voteKey, voters);
             // Sync to MongoDB sequentially in the background to prevent out-of-order writes
