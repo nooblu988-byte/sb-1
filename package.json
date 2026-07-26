@@ -15,6 +15,7 @@
     "discord-hybrid-sharding": "^3.0.1",
     "discord.js": "^14.25.1",
     "dns-cache": "^2.0.0",
+    "gif-encoder-2": "^1.0.5",
     "lmdb": "^3.4.3",
     "node-fetch": "^2.6.7",
     "quickmongo": "^5.2.0",
