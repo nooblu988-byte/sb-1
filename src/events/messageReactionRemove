@@ -73,21 +73,23 @@ async function updateLeaderboard(client, guild) {
 
 module.exports = (client) => {
     client.on("messageReactionRemove", async (reaction, user) => {
-        if (user.bot || !reaction.message.guild) return;
+        const guild = reaction.message.guild || client.guilds.cache.get(reaction.message.guildId);
+        if (user.bot || !guild) return;
 
-        const guildId = reaction.message.guild.id;
+        const guildId = guild.id;
         const messageId = reaction.message.id;
 
         // Fetch card metadata directly from MongoDB
         const isCard = await client.db.get(`voting_card_${guildId}_${messageId}`);
         if (!isCard) return;
 
-        if (reaction.partial) {
+        // Fetch user if partial
+        let voter = user;
+        if (voter.partial) {
             try {
-                await reaction.fetch();
+                voter = await client.users.fetch(voter.id);
             } catch (err) {
-                console.error("Failed to fetch partial reaction:", err);
-                return;
+                console.error("Failed to fetch partial user in messageReactionRemove:", err);
             }
         }
 
@@ -109,8 +111,8 @@ module.exports = (client) => {
         // Fetch voters directly from MongoDB
         let voters = (await client.db.get(voteKey)) || [];
 
-        if (voters.includes(user.id)) {
-            voters = voters.filter(id => id !== user.id);
+        if (voters.includes(voter.id)) {
+            voters = voters.filter(id => id !== voter.id);
             // Write to MongoDB and keep local LMDB in sync
             await client.db.set(voteKey, voters);
             client.lmdb.put(voteKey, voters);
@@ -120,7 +122,12 @@ module.exports = (client) => {
             const logsChan = client.channels.cache.get(logsId) || 
                              await client.channels.fetch(logsId).catch(() => null);
             if (logsChan) {
-                const avatarUrl = user.displayAvatarURL({ size: 256 });
+                let avatarUrl;
+                try {
+                    avatarUrl = voter.displayAvatarURL({ size: 256 });
+                } catch {
+                    avatarUrl = voter.defaultAvatarURL;
+                }
                 const container = new ContainerBuilder()
                     .setAccentColor(0xE74C3C)
                     .addSectionComponents(
@@ -133,7 +140,7 @@ module.exports = (client) => {
                     .addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small))
                     .addTextDisplayComponents(
                         new TextDisplayBuilder().setContent(
-                            `> **Voter:** ${user} (\`${user.tag}\` / \`${user.id}\`)\n` +
+                            `> **Voter:** ${voter} (\`${voter.tag || voter.id}\` / \`${voter.id}\`)\n` +
                             `> **Removed Vote From:** **${isCard.teamName}**\n` +
                             `> **Target Member:** <@${isCard.userId}>\n` +
                             `> **Timestamp:** <t:${Math.floor(Date.now() / 1000)}:T> (<t:${Math.floor(Date.now() / 1000)}:R>)`
@@ -147,7 +154,7 @@ module.exports = (client) => {
             }
 
             // Do not await updateLeaderboard to make reaction response instant and smooth
-            updateLeaderboard(client, reaction.message.guild).catch(console.error);
+            updateLeaderboard(client, guild).catch(console.error);
         }
     });
 };
