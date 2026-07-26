@@ -262,11 +262,11 @@ module.exports = {
                     }
 
                     teamCounter++;
-                    let dropContent = `## **TEAM ${teamCounter}:- ${participant.teamName}**\n`;
+                    let dropContent = `### **TEAM ${teamCounter}:- ${participant.teamName}**\n`;
                     if (participant.isDuo && participant.teammateId) {
-                        dropContent += `## **NAME:-** <@${participant.userId}> & <@${participant.teammateId}>`;
+                        dropContent += `### **NAME:-** <@${participant.userId}> & <@${participant.teammateId}>`;
                     } else {
-                        dropContent += `## **NAME:-** <@${participant.userId}>`;
+                        dropContent += `### **NAME:-** <@${participant.userId}>`;
                     }
 
                     const pfpMessage = await message.channel.send({
@@ -357,11 +357,11 @@ module.exports = {
                     fileAttachment = { attachment: participant.pfpUrl, name: `${participant.teamName}_pfp.png` };
                 }
 
-                let dropContent = `## **TEAM 1:- ${participant.teamName}**\n`;
+                let dropContent = `### **TEAM 1:- ${participant.teamName}**\n`;
                 if (participant.isDuo && participant.teammateId) {
-                    dropContent += `## **NAME:-** <@${participant.userId}> & <@${participant.teammateId}>`;
+                    dropContent += `### **NAME:-** <@${participant.userId}> & <@${participant.teammateId}>`;
                 } else {
-                    dropContent += `## **NAME:-** <@${participant.userId}>`;
+                    dropContent += `### **NAME:-** <@${participant.userId}>`;
                 }
 
                 const pfpMessage = await message.channel.send({
