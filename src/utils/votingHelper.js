@@ -213,6 +213,10 @@ async function disableVoting(client, guild, authorMember) {
     // 2. Clear all voting cards and votes records
     const cards = client.lmdbGet(`voting_cards_${guildId}`) || [];
     for (const card of cards) {
+        const voters = client.lmdbGet(`votes_${guildId}_${card.messageId}`) || [];
+        for (const voterId of voters) {
+            client.lmdbDel(`voter_record_${guildId}_${voterId}`);
+        }
         client.lmdbDel(`voting_card_${guildId}_${card.messageId}`);
         client.lmdbDel(`votes_${guildId}_${card.messageId}`);
     }
