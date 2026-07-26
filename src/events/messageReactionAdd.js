@@ -18,8 +18,14 @@ module.exports = (client) => {
         const guildId = guild.id;
         const messageId = reaction.message.id;
 
-        // Fetch card directly from MongoDB for real-time consistency across shards/restarts
-        const isCard = await client.db.get(`voting_card_${guildId}_${messageId}`);
+        // Fetch card metadata from LMDB (fallback to MongoDB)
+        let isCard = client.lmdbGet(`voting_card_${guildId}_${messageId}`);
+        if (!isCard) {
+            isCard = await client.db.get(`voting_card_${guildId}_${messageId}`);
+            if (isCard) {
+                client.lmdb.putSync(`voting_card_${guildId}_${messageId}`, isCard);
+            }
+        }
         if (!isCard) return;
 
         // Fetch user if partial
@@ -50,14 +56,15 @@ module.exports = (client) => {
 
         const voteKey = `votes_${guildId}_${messageId}`;
         
-        // Fetch voters directly from MongoDB
-        const voters = (await client.db.get(voteKey)) || [];
+        // Fetch voters synchronously from LMDB
+        const voters = client.lmdbGet(voteKey) || [];
 
         if (!voters.includes(voter.id)) {
             voters.push(voter.id);
-            // Write to MongoDB and keep local LMDB in sync
-            await client.db.set(voteKey, voters);
-            client.lmdb.put(voteKey, voters);
+            // Write to LMDB synchronously to prevent race conditions
+            client.lmdb.putSync(voteKey, voters);
+            // Sync to MongoDB asynchronously in the background
+            client.db.set(voteKey, voters).catch(err => console.error("Failed to sync vote to MongoDB:", err));
 
             const logsId = client.lmdbGet(`voting_logs_channel_${guildId}`) || 
                            client.lmdbGet(`logging_cfg_${guildId}`)?.voting;
@@ -98,9 +105,9 @@ module.exports = (client) => {
                 }).catch(() => {});
             }
 
-            // Do not await updateLeaderboard to make the reaction response instant and smooth
-            const { updateLeaderboard } = require("./messageReactionRemove");
-            updateLeaderboard(client, guild).catch(console.error);
+            // Do not await scheduleLeaderboardUpdate to make reaction response instant and smooth
+            const { scheduleLeaderboardUpdate } = require("./messageReactionRemove");
+            scheduleLeaderboardUpdate(client, guild).catch(console.error);
         }
     });
 };
