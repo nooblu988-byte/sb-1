@@ -129,6 +129,21 @@ module.exports = (client) => {
                 });
             }
 
+            // Check if there is already an active registration thread for this user
+            const activeRegThreadId = client.lmdbGet(`active_reg_${guildId}_${interaction.user.id}`);
+            if (activeRegThreadId) {
+                const activeThread = interaction.guild.channels.cache.get(activeRegThreadId) || 
+                                     await interaction.guild.channels.fetch(activeRegThreadId).catch(() => null);
+                if (activeThread) {
+                    return interaction.reply({
+                        content: `${crossEmoji} **You already have an active registration thread open!** Please check ${activeThread} to complete your registration first.`,
+                        flags: 64
+                    });
+                } else {
+                    client.lmdbDel(`active_reg_${guildId}_${interaction.user.id}`);
+                }
+            }
+
             // Create private thread under the registration channel
             const channel = interaction.channel;
             const thread = await channel.threads.create({
@@ -152,6 +167,9 @@ module.exports = (client) => {
                     flags: 64
                 });
             }
+
+            // Save active registration thread ID to prevent multiple wizards for the same user
+            client.lmdbSet(`active_reg_${guildId}_${interaction.user.id}`, thread.id);
 
             await thread.members.add(interaction.user.id).catch(() => {});
             await interaction.reply({
@@ -345,6 +363,9 @@ async function runRegistrationWizard(client, thread, interaction, isDuo) {
         });
 
         collector.on("end", async (collected, reason) => {
+            // Remove active registration thread lock
+            client.lmdbDel(`active_reg_${guildId}_${interaction.user.id}`);
+
             if (reason !== "completed") {
                 await thread.send({ content: "⏳ **Registration timed out.** This thread will be deleted." }).catch(() => {});
                 setTimeout(() => thread.delete().catch(() => {}), 5000);
@@ -491,6 +512,7 @@ async function runRegistrationWizard(client, thread, interaction, isDuo) {
 
                 setTimeout(() => thread.delete().catch(() => {}), 5000);
             } catch (err) {
+                client.lmdbDel(`active_reg_${guildId}_${interaction.user.id}`);
                 console.error("Error inside wizard completion:", err);
                 await loadingMsg.delete().catch(() => {});
                 await thread.send({ content: `${crossEmoji} **Failed to complete registration:** ${err.message}. Thread will close.` }).catch(() => {});
@@ -498,6 +520,7 @@ async function runRegistrationWizard(client, thread, interaction, isDuo) {
             }
         });
     } catch (err) {
+        client.lmdbDel(`active_reg_${guildId}_${interaction.user.id}`);
         console.error("Failed to execute registration wizard:", err);
         thread.send({ content: `${crossEmoji} **Wizard Error:** ${err.message}` }).catch(() => {});
         setTimeout(() => thread.delete().catch(() => {}), 10000);
