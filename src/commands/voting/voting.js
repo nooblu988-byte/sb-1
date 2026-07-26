@@ -80,7 +80,8 @@ module.exports = {
                                 `\`${prefix}voting hide\` — Hide voting and registration channels\n` +
                                 `\`${prefix}voting unhide\` — Unhide voting and registration channels\n` +
                                 `\`${prefix}voting status\` — View configurations & control panel\n` +
-                                `\`${prefix}voting removebot\` — Clean up underage votes (< 25 days old) live\n\n` +
+                                `\`${prefix}voting removebot\` — Clean up underage votes (< 25 days old) live\n` +
+                                `\`${prefix}voting reset <@user>\` — Reset registration & voting data for a participant\n\n` +
                                 `### ⚙️ Emoji Configurations\n` +
                                 `\`${prefix}voting setemoji <emoji>\` — Configure voting reaction emoji\n` +
                                 `\`${prefix}voting settrophy <emoji>\` — Configure trophy/title emoji\n` +
@@ -594,6 +595,137 @@ module.exports = {
                 await statusMsg.edit({ content: `${crossEmoji} **Cleanup Failed:** ${err.message}` });
             }
             return;
+        }
+
+        if (sub === "reset" || sub === "unregister" || sub === "resetreg") {
+            const targetUser = message.mentions.users.first() || 
+                               (args[1] ? await client.users.fetch(args[1]).catch(() => null) : null);
+
+            if (!targetUser) {
+                return message.reply({ content: `${crossEmoji} **Please specify the user to reset.** (e.g. \`${prefix}voting reset @User\`)` });
+            }
+
+            const statusMsg = await message.reply({ content: `⏳ **Resetting registration and data for ${targetUser}...**` });
+
+            try {
+                const targetId = targetUser.id;
+                let foundAny = false;
+
+                // 1. Check for active registration thread/ticket
+                const activeThreadId = client.lmdbGet(`active_reg_${guildId}_${targetId}`);
+                if (activeThreadId) {
+                    const threadChan = message.guild.channels.cache.get(activeThreadId) || 
+                                       await message.guild.channels.fetch(activeThreadId).catch(() => null);
+                    if (threadChan) {
+                        await threadChan.delete("Registration reset command used").catch(() => {});
+                    }
+                    client.lmdbDel(`active_reg_${guildId}_${targetId}`);
+                    foundAny = true;
+                }
+
+                // 2. Fetch participant data
+                let participantData = client.lmdbGet(`participant_${guildId}_${targetId}`);
+                if (!participantData) {
+                    // Try to find if they are registered as a teammate in someone else's duo
+                    const participantsList = client.lmdbGet(`participants_${guildId}`) || [];
+                    for (const pid of participantsList) {
+                        const pData = client.lmdbGet(`participant_${guildId}_${pid}`);
+                        if (pData && (pData.userId === targetId || pData.teammateId === targetId)) {
+                            participantData = pData;
+                            break;
+                        }
+                    }
+                }
+
+                if (participantData) {
+                    foundAny = true;
+                    const fs = require("fs");
+
+                    // Delete local PFP file if exists
+                    if (participantData.pfpLocalPath && fs.existsSync(participantData.pfpLocalPath)) {
+                        try {
+                            fs.unlinkSync(participantData.pfpLocalPath);
+                        } catch (err) {
+                            console.error("Failed to delete local pfp file on reset:", err);
+                        }
+                    }
+
+                    // Collect all user IDs involved (user + teammate if duo)
+                    const idsToRemove = [participantData.userId];
+                    if (participantData.isDuo && participantData.teammateId) {
+                        idsToRemove.push(participantData.teammateId);
+                    }
+
+                    // Remove participant keys from database
+                    for (const id of idsToRemove) {
+                        client.lmdbDel(`participant_${guildId}_${id}`);
+                        // Also clear active registration for teammate if any
+                        client.lmdbDel(`active_reg_${guildId}_${id}`);
+                    }
+
+                    // Remove from participants list
+                    let participants = client.lmdbGet(`participants_${guildId}`) || [];
+                    participants = participants.filter(id => !idsToRemove.includes(id));
+                    client.lmdbSet(`participants_${guildId}`, participants);
+
+                    // 3. Remove voting cards if already dropped
+                    const cards = (await client.db.get(`voting_cards_${guildId}`)) || [];
+                    const remainingCards = [];
+
+                    for (const card of cards) {
+                        // Check if card belongs to any of the removed IDs
+                        if (idsToRemove.includes(card.userId)) {
+                            // Delete Discord message
+                            if (card.channelId && card.messageId) {
+                                const chan = message.guild.channels.cache.get(card.channelId) || 
+                                             await message.guild.channels.fetch(card.channelId).catch(() => null);
+                                if (chan) {
+                                    const msg = await chan.messages.fetch(card.messageId).catch(() => null);
+                                    if (msg) {
+                                        await msg.delete().catch(() => {});
+                                    }
+                                }
+                            }
+
+                            // Delete voter records for all voters on this card
+                            const voteKey = `votes_${guildId}_${card.messageId}`;
+                            const voters = (await client.db.get(voteKey)) || [];
+                            for (const voterId of voters) {
+                                client.lmdbDel(`voter_record_${guildId}_${voterId}`);
+                            }
+
+                            // Delete card keys
+                            client.lmdbDel(`voting_card_${guildId}_${card.messageId}`);
+                            client.lmdbDel(voteKey);
+                            await client.db.delete(voteKey).catch(() => {});
+                        } else {
+                            remainingCards.push(card);
+                        }
+                    }
+
+                    // Update cards in DB/LMDB
+                    await client.db.set(`voting_cards_${guildId}`, remainingCards);
+                    client.lmdb.put(`voting_cards_${guildId}`, remainingCards);
+
+                    // Sync leaderboard
+                    const { updateLeaderboard } = require("../../events/messageReactionRemove");
+                    await updateLeaderboard(client, message.guild).catch(() => {});
+                }
+
+                if (foundAny) {
+                    return statusMsg.edit({
+                        content: `${tickEmoji} **Successfully reset registration and cleared all data for ${targetUser}.** They can now register again.`
+                    });
+                } else {
+                    return statusMsg.edit({
+                        content: `${crossEmoji} **Could not find any active registration or participant data for ${targetUser}.**`
+                    });
+                }
+
+            } catch (err) {
+                console.error("Reset failed:", err);
+                return statusMsg.edit({ content: `${crossEmoji} **Failed to reset registration:** ${err.message}` });
+            }
         }
     }
 };
