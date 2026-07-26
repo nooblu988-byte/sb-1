@@ -1,24 +1,74 @@
 const { ContainerBuilder, TextDisplayBuilder, SectionBuilder, ThumbnailBuilder, SeparatorBuilder, SeparatorSpacingSize, MessageFlags } = require("discord.js");
 const { getTrophyEmoji, getVoteEmoji, getArrowEmoji, getTickEmoji, getCrossEmoji } = require("../utils/votingHelper");
 
+const activeUpdates = new Map(); // guildId -> { isRunning: boolean, pendingUpdate: boolean }
+
+async function scheduleLeaderboardUpdate(client, guild) {
+    const guildId = guild.id;
+    let state = activeUpdates.get(guildId);
+    if (!state) {
+        state = { isRunning: false, pendingUpdate: false };
+        activeUpdates.set(guildId, state);
+    }
+
+    if (state.isRunning) {
+        state.pendingUpdate = true;
+        return;
+    }
+
+    state.isRunning = true;
+    try {
+        await updateLeaderboard(client, guild);
+    } catch (err) {
+        console.error("Error updating leaderboard:", err);
+    } finally {
+        state.isRunning = false;
+        if (state.pendingUpdate) {
+            state.pendingUpdate = false;
+            // Wait 2 seconds before running the pending update to throttle API calls
+            setTimeout(() => scheduleLeaderboardUpdate(client, guild), 2000);
+        }
+    }
+}
+
 async function updateLeaderboard(client, guild) {
     const guildId = guild.id;
     
-    // Fetch leaderboard channel directly from MongoDB
-    const leaderboardChanId = await client.db.get(`voting_leaderboard_channel_${guildId}`);
+    // Fetch leaderboard channel from LMDB (fallback to DB)
+    let leaderboardChanId = client.lmdbGet(`voting_leaderboard_channel_${guildId}`);
+    if (!leaderboardChanId) {
+        leaderboardChanId = await client.db.get(`voting_leaderboard_channel_${guildId}`);
+        if (leaderboardChanId) {
+            client.lmdb.putSync(`voting_leaderboard_channel_${guildId}`, leaderboardChanId);
+        }
+    }
     if (!leaderboardChanId) return;
 
     const channel = guild.channels.cache.get(leaderboardChanId) || 
                     await guild.channels.fetch(leaderboardChanId).catch(() => null);
     if (!channel) return;
 
-    // Get all active voting cards from MongoDB
-    const cards = (await client.db.get(`voting_cards_${guildId}`)) || [];
+    // Get all active voting cards from LMDB (fallback to DB)
+    let cards = client.lmdbGet(`voting_cards_${guildId}`);
+    if (!cards) {
+        cards = await client.db.get(`voting_cards_${guildId}`);
+        if (cards) {
+            client.lmdb.putSync(`voting_cards_${guildId}`, cards);
+        }
+    }
+    cards = cards || [];
     if (cards.length === 0) return;
 
-    // Map cards to include vote count from MongoDB
+    // Map cards to include vote count from LMDB (fallback to DB)
     const standings = await Promise.all(cards.map(async card => {
-        const voters = (await client.db.get(`votes_${guildId}_${card.messageId}`)) || [];
+        let voters = client.lmdbGet(`votes_${guildId}_${card.messageId}`);
+        if (!voters) {
+            voters = await client.db.get(`votes_${guildId}_${card.messageId}`);
+            if (voters) {
+                client.lmdb.putSync(`votes_${guildId}_${card.messageId}`, voters);
+            }
+        }
+        voters = voters || [];
         return {
             ...card,
             votes: voters.length
@@ -47,8 +97,15 @@ async function updateLeaderboard(client, guild) {
             new TextDisplayBuilder().setContent(leaderboardContent)
         );
 
-    // Check if we have an existing leaderboard message in MongoDB
-    const msgId = await client.db.get(`voting_leaderboard_msg_${guildId}`);
+    // Check if we have an existing leaderboard message in LMDB (fallback to DB)
+    let msgId = client.lmdbGet(`voting_leaderboard_msg_${guildId}`);
+    if (!msgId) {
+        msgId = await client.db.get(`voting_leaderboard_msg_${guildId}`);
+        if (msgId) {
+            client.lmdb.putSync(`voting_leaderboard_msg_${guildId}`, msgId);
+        }
+    }
+
     let existingMsg = null;
     if (msgId) {
         existingMsg = await channel.messages.fetch(msgId).catch(() => null);
@@ -65,8 +122,7 @@ async function updateLeaderboard(client, guild) {
             flags: MessageFlags.IsComponentsV2
         }).catch(() => null);
         if (newMsg) {
-            await client.db.set(`voting_leaderboard_msg_${guildId}`, newMsg.id);
-            client.lmdb.put(`voting_leaderboard_msg_${guildId}`, newMsg.id);
+            client.lmdbSet(`voting_leaderboard_msg_${guildId}`, newMsg.id);
         }
     }
 }
@@ -88,8 +144,14 @@ module.exports = (client) => {
         const guildId = guild.id;
         const messageId = reaction.message.id;
 
-        // Fetch card metadata directly from MongoDB
-        const isCard = await client.db.get(`voting_card_${guildId}_${messageId}`);
+        // Fetch card metadata from LMDB (fallback to MongoDB)
+        let isCard = client.lmdbGet(`voting_card_${guildId}_${messageId}`);
+        if (!isCard) {
+            isCard = await client.db.get(`voting_card_${guildId}_${messageId}`);
+            if (isCard) {
+                client.lmdb.putSync(`voting_card_${guildId}_${messageId}`, isCard);
+            }
+        }
         if (!isCard) return;
 
         // Fetch user if partial
@@ -117,14 +179,15 @@ module.exports = (client) => {
 
         const voteKey = `votes_${guildId}_${messageId}`;
         
-        // Fetch voters directly from MongoDB
-        let voters = (await client.db.get(voteKey)) || [];
+        // Fetch voters synchronously from LMDB
+        let voters = client.lmdbGet(voteKey) || [];
 
         if (voters.includes(voter.id)) {
             voters = voters.filter(id => id !== voter.id);
-            // Write to MongoDB and keep local LMDB in sync
-            await client.db.set(voteKey, voters);
-            client.lmdb.put(voteKey, voters);
+            // Write to LMDB synchronously to prevent race conditions
+            client.lmdb.putSync(voteKey, voters);
+            // Sync to MongoDB asynchronously in the background
+            client.db.set(voteKey, voters).catch(err => console.error("Failed to sync retracted vote to MongoDB:", err));
 
             const logsId = client.lmdbGet(`voting_logs_channel_${guildId}`) || 
                            client.lmdbGet(`logging_cfg_${guildId}`)?.voting;
@@ -162,10 +225,11 @@ module.exports = (client) => {
                 }).catch(() => {});
             }
 
-            // Do not await updateLeaderboard to make reaction response instant and smooth
-            updateLeaderboard(client, guild).catch(console.error);
+            // Do not await scheduleLeaderboardUpdate to make reaction response instant and smooth
+            scheduleLeaderboardUpdate(client, guild).catch(console.error);
         }
     });
 };
 
 module.exports.updateLeaderboard = updateLeaderboard;
+module.exports.scheduleLeaderboardUpdate = scheduleLeaderboardUpdate;
