@@ -1,10 +1,39 @@
 const QRCode = require("qrcode");
 
-function getUpi(client, userId) {
-    return client.lmdbGet(`qr_upi_${userId}`) || null;
+// Each user's profile: { default: {upiId, payeeName} | null, named: { <nickname>: {upiId, payeeName} } }
+function getProfile(client, userId) {
+    return client.lmdbGet(`qr_upi_${userId}`) || { default: null, named: {} };
 }
-function saveUpi(client, userId, data) {
-    return client.lmdbSet(`qr_upi_${userId}`, data);
+function saveProfile(client, userId, profile) {
+    return client.lmdbSet(`qr_upi_${userId}`, profile);
+}
+
+function setDefaultUpi(client, userId, upiId, payeeName) {
+    const profile = getProfile(client, userId);
+    profile.default = { upiId, payeeName };
+    saveProfile(client, userId, profile);
+}
+
+function setNamedUpi(client, userId, nickname, upiId, payeeName) {
+    const profile = getProfile(client, userId);
+    if (!profile.named) profile.named = {};
+    profile.named[nickname.toLowerCase()] = { upiId, payeeName };
+    saveProfile(client, userId, profile);
+}
+
+function getNamedUpi(client, userId, nickname) {
+    const profile = getProfile(client, userId);
+    return profile.named?.[nickname.toLowerCase()] || null;
+}
+
+function removeNamedUpi(client, userId, nickname) {
+    const profile = getProfile(client, userId);
+    if (profile.named) delete profile.named[nickname.toLowerCase()];
+    saveProfile(client, userId, profile);
+}
+
+function listNamedUpis(client, userId) {
+    return getProfile(client, userId).named || {};
 }
 
 function getLogChannel(client, guildId) {
@@ -32,8 +61,13 @@ async function generateQR(upiURL) {
 }
 
 module.exports = {
-    getUpi,
-    saveUpi,
+    getProfile,
+    saveProfile,
+    setDefaultUpi,
+    setNamedUpi,
+    getNamedUpi,
+    removeNamedUpi,
+    listNamedUpis,
     getLogChannel,
     setLogChannel,
     buildUpiURL,
