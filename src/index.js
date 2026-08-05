@@ -45,16 +45,16 @@ try {
  }
 } catch {}
 
- const client = new Client({
-  intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMembers,
-    GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent,
-    GatewayIntentBits.GuildModeration,
-    GatewayIntentBits.GuildVoiceStates,
-    GatewayIntentBits.GuildMessageReactions,
-  ],
+const client = new Client({
+ intents: [
+ GatewayIntentBits.Guilds,
+ GatewayIntentBits.GuildMembers,
+ GatewayIntentBits.GuildMessages,
+ GatewayIntentBits.MessageContent,
+ GatewayIntentBits.GuildModeration,
+ GatewayIntentBits.GuildVoiceStates,
+ GatewayIntentBits.GuildMessageReactions, // required for the voting feature's vote-reaction tracking
+ ],
  partials: [
  Partials.Channel,
  Partials.GuildMember,
@@ -135,11 +135,10 @@ client.lmdbDel = (key) => {
 async function hydratePersistentSettings() {
  try {
  await client.db.connect();
- // Query MongoDB directly to bypass the Atlas tier $where block on db.all()
- const saved = await client.db.model.find({});
- for (const doc of saved) {
- if (doc.ID === undefined || doc.data === undefined) continue;
- lmdb.putSync(doc.ID, doc.data);
+ const saved = await client.db.all();
+ for (const { ID, data } of saved) {
+ if (ID === undefined || data === undefined) continue;
+ lmdb.putSync(ID, data);
  }
  console.log(`${c.purple}${c.bright} Restored ${c.white}${saved.length}${c.purple} saved server setting(s) from MongoDB ${c.reset}`);
  } catch (err) {
