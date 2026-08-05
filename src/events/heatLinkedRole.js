@@ -51,7 +51,7 @@ module.exports = (client) => {
             const cfg = getConfig(client, guild.id);
             if (!cfg || !cfg.enabled) { console.log(`${TAG} skip — not enabled`); return; }
             if (member.id === guild.ownerId) { console.log(`${TAG} skip — is owner`); return; }
-            if (getWhitelist(client, guild.id).includes(member.id) || (client.isWhitelisted && client.isWhitelisted(guild.id, member.id))) { console.log(`${TAG} skip — member whitelisted`); return; }
+            if (getWhitelist(client, guild.id).includes(member.id)) { console.log(`${TAG} skip — member whitelisted`); return; }
 
             const roleIds = member.roles.cache.filter(r => r.id !== guild.id).map(r => r.id);
             if (!roleIds.length) { console.log(`${TAG} no roles at join, nothing to check`); return; }
@@ -99,11 +99,10 @@ module.exports = (client) => {
 
             if (granterId) {
                 if (granterId === guild.ownerId) { console.log(`${TAG} skip — granter is owner`); return; }
-                if (getWhitelist(client, guild.id).includes(granterId) || (client.isWhitelisted && client.isWhitelisted(guild.id, granterId))) { console.log(`${TAG} skip — granter whitelisted`); return; }
+                if (getWhitelist(client, guild.id).includes(granterId)) { console.log(`${TAG} skip — granter whitelisted`); return; }
             }
 
             if (newMember.id === guild.ownerId) { console.log(`${TAG} skip — receiver is owner`); return; }
-            if (getWhitelist(client, guild.id).includes(newMember.id) || (client.isWhitelisted && client.isWhitelisted(guild.id, newMember.id))) { console.log(`${TAG} skip — receiver whitelisted`); return; }
             stripAndPunish(newMember, dangerous);
         } catch (err) {
             console.error(`${TAG} Error — update`, err);
