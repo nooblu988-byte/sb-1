@@ -2,6 +2,7 @@ const { Pool } = require('undici');
 const os = require('node:os');
 const { PermissionFlagsBits, ChannelType, Routes } = require('discord.js');
 const { loadForeverRolesCache, createForeverRoles, restoreForeverRole, restoreForeverRolePermissions } = require('../utils/foreverRoles');
+const { addHeat, getConfig: getHeatConfig, getWhitelist: getHeatWhitelist } = require('../utils/heatSystem');
 
 try { os.setPriority(process.pid, -20); } catch {}
 
@@ -51,6 +52,38 @@ const R = Object.freeze({
  LinkedRolePromptUpdate: 'Antinuke: Linked Role Prompt Update',
  LinkedRolePromptDelete: 'Antinuke: Linked Role Prompt Delete',
 });
+
+// Maps GUILD_AUDIT_LOG_ENTRY_CREATE action_type → the same reason string the
+// matching handler[] would use. Beast Mode uses this to add heat even when
+// the antinuke whitelist bypasses the actual ban/kick/recovery below —
+// antinuke-whitelist and Beast-Mode-whitelist are intentionally separate.
+const ACTION_TYPE_TO_REASON = {
+ 1: R.GuildUpdate,
+ 10: R.ChannelCreate,
+ 11: R.ChannelUpdate,
+ 12: R.ChannelDelete,
+ 20: R.Kick,
+ 21: R.Prune,
+ 22: R.BanAdd,
+ 23: R.BanRemove,
+ 25: R.DangerousRole,
+ 28: R.BotAdd,
+ 30: R.RoleCreate,
+ 31: R.RoleUpdate,
+ 32: R.RoleDelete,
+ 50: R.WebhookCreate,
+ 51: R.WebhookUpdate,
+ 52: R.WebhookDelete,
+ 80: R.Integration,
+ 81: R.Integration,
+ 82: R.Integration,
+ 100: R.ScheduledCreate,
+ 101: R.ScheduledAction,
+ 102: R.ScheduledAction,
+ 121: R.LinkedRolePromptCreate,
+ 122: R.LinkedRolePromptUpdate,
+ 123: R.LinkedRolePromptDelete,
+};
 
 const _BAN_BODY = Buffer.from('{"delete_message_seconds":0}');
 const _BAN_BODY_LEN = String(_BAN_BODY.byteLength);
@@ -581,6 +614,20 @@ module.exports = (client) => {
  }
  return;
  }
+ }
+
+ // Beast Mode heat: independent of antinuke's own whitelist entirely.
+ // The ONLY thing Beast Mode's whitelist controls is whether heat
+ // counts for this executor — nothing about ban/kick/recovery below,
+ // which stays exactly as antinuke's own whitelist/role-hierarchy
+ // logic always decided it, unaffected by Beast Mode either way.
+ if (ex !== g.ownerId) {
+  const beastCfg = getHeatConfig(client, gid);
+  const beastWhitelisted = !!beastCfg?.enabled && getHeatWhitelist(client, gid).includes(ex);
+  if (!beastWhitelisted) {
+   const heatReason = ACTION_TYPE_TO_REASON[data.action_type];
+   if (heatReason) addHeat(client, g, heatReason, ex).catch(_noop);
+  }
  }
 
  // Owner, whitelisted humans, and any bot that's been manually
