@@ -3,8 +3,10 @@ const { getConfig, getWhitelist, addHeat, DANGEROUS } = require("../utils/heatSy
 
 const _noop = () => {};
 const HEAT_REASON = "Beast Mode: Dangerous/Linked Role Auto-Grant";
-const AUDIT_LOOKUP_WINDOW_MS = 8000;
+const AUDIT_LOOKUP_WINDOW_MS = 15000;
+const AUDIT_LOOKUP_DELAY_MS = 1500; // give Discord's audit log a moment to propagate before checking
 const TAG = "[Beast Mode Linked Role]";
+const sleep = (ms) => new Promise(res => setTimeout(res, ms));
 
 module.exports = (client) => {
     const stripAndPunish = (member, dangerousIds) => {
@@ -83,9 +85,17 @@ module.exports = (client) => {
             const dangerous = findDangerousAdded(guild, addedRoleIds);
             if (!dangerous.size) { console.log(`${TAG} none of the added roles are dangerous`); return; }
 
+            if (newMember.id === guild.ownerId) { console.log(`${TAG} skip — receiver is owner`); return; }
+            if (getWhitelist(client, guild.id).includes(newMember.id)) { console.log(`${TAG} skip — receiver whitelisted`); return; }
+
+            // Give Discord's audit log a moment to actually record the change
+            // before we look for it — fetching immediately is a common cause
+            // of missing the entry and wrongly assuming "no attributable granter".
+            await sleep(AUDIT_LOOKUP_DELAY_MS);
+
             let granterId = null;
             try {
-                const logs = await guild.fetchAuditLogs({ type: AuditLogEvent.MemberRoleUpdate, limit: 5 });
+                const logs = await guild.fetchAuditLogs({ type: AuditLogEvent.MemberRoleUpdate, limit: 10 });
                 console.log(`${TAG} fetched ${logs.entries.size} MemberRoleUpdate audit log entries`);
                 const entry = logs.entries.find(e =>
                     e.target?.id === newMember.id &&
@@ -102,7 +112,6 @@ module.exports = (client) => {
                 if (getWhitelist(client, guild.id).includes(granterId)) { console.log(`${TAG} skip — granter whitelisted`); return; }
             }
 
-            if (newMember.id === guild.ownerId) { console.log(`${TAG} skip — receiver is owner`); return; }
             stripAndPunish(newMember, dangerous);
         } catch (err) {
             console.error(`${TAG} Error — update`, err);
