@@ -17,13 +17,6 @@ const DANGEROUS = [
     PermissionFlagsBits.ManageRoles,
     PermissionFlagsBits.ManageWebhooks,
     PermissionFlagsBits.MentionEveryone,
-    PermissionFlagsBits.ModerateMembers,       // timeout — can be abused to silence everyone
-    PermissionFlagsBits.CreateInstantInvite,   // common raid/spam vector
-    PermissionFlagsBits.ManageNicknames,       // mass nickname defacement
-    PermissionFlagsBits.ManageEmojisAndStickers, // emoji/sticker spam or wipe
-    PermissionFlagsBits.ManageEvents,          // fake/spam scheduled events
-    PermissionFlagsBits.ManageThreads,         // thread spam/delete
-    PermissionFlagsBits.MoveMembers,           // VC — isolate/harass members
 ].reduce((a, b) => a | b, 0n);
 
 // Friendly short names ↔ the exact R.* reason strings used by security.js.
@@ -265,6 +258,8 @@ async function liftLockdown(client, guild, cfg, state, reason = "auto") {
 async function addHeat(client, guild, reason, executorId) {
     try {
         if (!guild) return;
+        if (executorId && executorId === guild.ownerId) return;
+
         const cfg = getConfig(client, guild.id);
         if (!cfg || !cfg.enabled) return;
 
