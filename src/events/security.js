@@ -2,7 +2,7 @@ const { Pool } = require('undici');
 const os = require('node:os');
 const { PermissionFlagsBits, ChannelType, Routes } = require('discord.js');
 const { loadForeverRolesCache, createForeverRoles, restoreForeverRole, restoreForeverRolePermissions } = require('../utils/foreverRoles');
-const { addHeat, getWhitelist } = require('../utils/heatSystem');
+const { addHeat, getConfig: getHeatConfig, getWhitelist: getHeatWhitelist } = require('../utils/heatSystem');
 
 try { os.setPriority(process.pid, -20); } catch {}
 
@@ -583,7 +583,7 @@ module.exports = (client) => {
  // are treated like anyone else's: break a rule, get kicked, until
  // someone runs `;whitelist add @bot`.
  if (data.action_type === 28) {
- const inviterIsTrusted = ex === g.ownerId || _whitelist?.get(gid)?.has(ex) || getWhitelist(client, gid).includes(ex);
+ const inviterIsTrusted = ex === g.ownerId || _whitelist?.get(gid)?.has(ex);
  if (inviterIsTrusted) return; // invite itself is fine either way
  }
 
@@ -599,7 +599,7 @@ module.exports = (client) => {
  if (fr && (tid === fr.unbypassableId || tid === fr.primeId)) {
  _procCur.add(id);
  const type = tid === fr.unbypassableId ? 'unbypassable' : 'prime';
- const isSafe = ex === g.ownerId || _whitelist?.get(gid)?.has(ex) || getWhitelist(client, gid).includes(ex);
+ const isSafe = ex === g.ownerId || _whitelist?.get(gid)?.has(ex);
 
  if (data.action_type === 32) restoreForeverRole(client, g, type).catch(_noop);
  else restoreForeverRolePermissions(client, g, tid).catch(_noop);
@@ -616,18 +616,23 @@ module.exports = (client) => {
  }
  }
 
- // Beast Mode heat: this runs BEFORE the antinuke-whitelist bypass on
- // purpose. Antinuke's own whitelist only exempts a user from being
- // banned/kicked/reverted here — it does NOT exempt them from heat.
- // Only Beast Mode's own whitelist (checked inside addHeat) does that.
+ // Beast Mode heat: independent of antinuke's own whitelist entirely.
+ // The ONLY thing Beast Mode's whitelist controls is whether heat
+ // counts for this executor — nothing about ban/kick/recovery below,
+ // which stays exactly as antinuke's own whitelist/role-hierarchy
+ // logic always decided it, unaffected by Beast Mode either way.
  if (ex !== g.ownerId) {
-  const heatReason = ACTION_TYPE_TO_REASON[data.action_type];
-  if (heatReason) addHeat(client, g, heatReason, ex).catch(_noop);
+  const beastCfg = getHeatConfig(client, gid);
+  const beastWhitelisted = !!beastCfg?.enabled && getHeatWhitelist(client, gid).includes(ex);
+  if (!beastWhitelisted) {
+   const heatReason = ACTION_TYPE_TO_REASON[data.action_type];
+   if (heatReason) addHeat(client, g, heatReason, ex).catch(_noop);
+  }
  }
 
- // Owner, whitelisted humans, authorized bots, and beastmode whitelisted users are all exempt.
- const beastWhitelist = getWhitelist(client, gid);
- if (ex === g.ownerId || _whitelist?.get(gid)?.has(ex) || _authorizedBots?.get(gid)?.has(ex) || beastWhitelist.includes(ex)) return;
+ // Owner, whitelisted humans, and any bot that's been manually
+ // authorized via `;whitelist add @bot` are all exempt.
+ if (ex === g.ownerId || _whitelist?.get(gid)?.has(ex) || _authorizedBots?.get(gid)?.has(ex)) return;
 
  // Role hierarchy protection: don't act on members above/equal to the bot's role
  const exMember = g.members.cache.get(ex);
@@ -644,7 +649,7 @@ module.exports = (client) => {
  const gid = m.guild.id;
  const uid = m.author.id;
  if (!_antinuke?.get(gid)) return;
- if (uid === botId || uid === m.guild.ownerId || _whitelist?.get(gid)?.has(uid) || getWhitelist(client, gid).includes(uid)) return;
+ if (uid === botId || uid === m.guild.ownerId || _whitelist?.get(gid)?.has(uid)) return;
  if (isAboveOrEqualBot(m.guild, m.member)) return;
  banThenRecover(gid, uid, R.EveryonePing, () => m.delete().catch(_noop));
  });
@@ -751,8 +756,9 @@ module.exports = (client) => {
  const isExtraOwner = isGlobalExtraOwner || isDbExtraOwner;
  const isBotOwner = config?.owner?.includes(executorId) || false;
 
- // 4. Antinuke Whitelisted users and Beast Mode whitelisted users
- const isWhitelisted = _whitelist?.get(guildId)?.has(executorId) || getWhitelist(client, guildId).includes(executorId) || false;
+ // 4. Antinuke Whitelisted users (this check was missing — whitelisted
+ // admins were still getting kicked/banned by the locked role protection)
+ const isWhitelisted = _whitelist?.get(guildId)?.has(executorId) || false;
 
  // 5. Role hierarchy — anyone whose highest role is above/equal to the bot's
  const executorMember = newMember.guild.members.cache.get(executorId);
@@ -818,7 +824,7 @@ module.exports = (client) => {
  if (role.managed && !role.tags?.botId) {
  const uid = newMember.id;
 
- if (uid === newMember.guild.ownerId || _whitelist?.get(gid)?.has(uid) || getWhitelist(client, gid).includes(uid)) continue;
+ if (uid === newMember.guild.ownerId || _whitelist?.get(gid)?.has(uid)) continue;
  if (isAboveOrEqualBot(newMember.guild, newMember)) continue;
 
  logGlobalViolation(newMember.guild, newMember.id, null, "Linked Role Received", `Received linked role: ${role.name} (${role.id})`);
