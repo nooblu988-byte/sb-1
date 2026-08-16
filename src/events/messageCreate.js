@@ -11,11 +11,8 @@ const {
   MessageFlags,
 } = require("discord.js");
 
-const { RateLimiter } = require("../utils/rateLimit");
-
 const commandCooldowns = new Map();
 const blacklistCooldown = new Map();
-const rateLimitWarnings = new Map();
 
 let globalLock = false;
 let lockTimeout = null;
@@ -31,43 +28,11 @@ function applyGlobalLock() {
 const sep = () => new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small);
 
 module.exports = async (client) => {
-  const rateLimiter = new RateLimiter(client);
-
   client.on("rateLimit", () => applyGlobalLock());
 
   client.on("messageCreate", async (message) => {
     if (!message.guild || message.author.bot) return;
     if (globalLock) return;
-
-    // ─── RATE LIMIT CHECK ───
-    const rateCheck = rateLimiter.check(message);
-    if (rateCheck.limited) {
-      const warnKey = `${message.author.id}-${message.guild.id}`;
-      const lastWarn = rateLimitWarnings.get(warnKey) || 0;
-      const now = Date.now();
-
-      if (now - lastWarn > 15000) {
-        rateLimitWarnings.set(warnKey, now);
-
-        let warnText = "⏳ **Rate Limited** — You are sending commands too fast. Please slow down.";
-
-        if (rateCheck.reason === "user") {
-          const remaining = rateLimiter.getUserLockoutRemaining(message.author.id, message.guild.id);
-          warnText = `⏳ **Rate Limited** — Too many commands. Wait **${remaining}s** before using commands again.`;
-        } else if (rateCheck.reason === "guild") {
-          const remaining = rateLimiter.getGuildLockoutRemaining(message.guild.id);
-          warnText = `⏳ **Server Rate Limited** — This server is sending too many commands. Wait **${remaining}s**.`;
-        } else if (rateCheck.reason === "global") {
-          warnText = `⏳ **Global Rate Limited** — Bot is under heavy load. Please wait a moment.`;
-        }
-
-        try {
-          const warnMsg = await message.channel.send({ content: warnText });
-          setTimeout(() => warnMsg.delete().catch(() => {}), 5000);
-        } catch (e) {}
-      }
-      return;
-    }
 
     const perms = message.channel.permissionsFor(message.guild.members.me);
     if (!perms || !perms.has([
