@@ -76,6 +76,24 @@ module.exports = (client) => {
             const cfg = getConfig(client, guild.id);
             if (!cfg || !cfg.enabled) { console.log(`${TAG} skip — not enabled`); return; }
 
+            // A member always has at least the @everyone role. If the old
+            // snapshot has none at all, or fewer roles than the new one by
+            // more than what actually changed, the cache we're comparing
+            // against is stale/incomplete (e.g. this update fired for an
+            // unrelated reason — nickname, timeout, boost — while the old
+            // role cache hadn't been fully populated yet). Diffing against
+            // an unreliable snapshot makes every existing role look
+            // "newly added", which is exactly what was causing random,
+            // unearned violations. Skip rather than risk a false positive.
+            if (oldMember.roles.cache.size === 0) {
+                console.log(`${TAG} skip — old member role cache is empty/unreliable, cannot safely diff`);
+                return;
+            }
+            if (newMember.roles.cache.size <= oldMember.roles.cache.size) {
+                console.log(`${TAG} skip — role count didn't grow, this update wasn't a role addition`);
+                return;
+            }
+
             const addedRoleIds = newMember.roles.cache
                 .filter(r => !oldMember.roles.cache.has(r.id))
                 .map(r => r.id);
