@@ -97,6 +97,11 @@ module.exports = {
                 .addActionRowComponents((row) => row.addComponents(makeDropdown()));
 
         const buildList = () => {
+            const sections = categories.map((cat, index) => {
+                const cmds = getCommands(cat).map(c => `\`${c.name}\``).join("  ") || "None";
+                return `**${index + 1}. ${capitalize(cat)}**\n${cmds}`;
+            });
+
             const container = new ContainerBuilder()
                 .setAccentColor(0x26272F)
                 .addTextDisplayComponents(
@@ -104,15 +109,23 @@ module.exports = {
                 )
                 .addSeparatorComponents(sep());
 
-            categories.forEach((cat, index) => {
-                const cmds = getCommands(cat).map(c => `\`${c.name}\``).join("  ") || "None";
-                container.addTextDisplayComponents(
-                    new TextDisplayBuilder().setContent(
-                        `**${index + 1}. ${capitalize(cat)}**\n${cmds}`
-                    )
-                );
-                if (index < categories.length - 1) container.addSeparatorComponents(thin());
-            });
+            // One combined text block instead of one component per category —
+            // keeps total component count well under Discord's per-message
+            // limit even as more categories get added over time. Split into
+            // multiple text blocks only if the combined content is too long
+            // for a single component (~3800 chars, leaving headroom under
+            // the 4000 cap).
+            let chunk = "";
+            for (const section of sections) {
+                const candidate = chunk ? `${chunk}\n\n${section}` : section;
+                if (candidate.length > 3800) {
+                    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(chunk));
+                    chunk = section;
+                } else {
+                    chunk = candidate;
+                }
+            }
+            if (chunk) container.addTextDisplayComponents(new TextDisplayBuilder().setContent(chunk));
 
             return container
                 .addSeparatorComponents(sep())
@@ -343,16 +356,21 @@ module.exports = {
         });
 
         collector.on("collect", async (i) => {
-            if (i.customId === "home") {
-                return i.update({ components: [buildHome()], flags: MessageFlags.IsComponentsV2 });
-            }
+            try {
+                if (i.customId === "home") {
+                    return await i.update({ components: [buildHome()], flags: MessageFlags.IsComponentsV2 });
+                }
 
-            if (i.customId === "list") {
-                return i.update({ components: [buildList()], flags: MessageFlags.IsComponentsV2 });
-            }
+                if (i.customId === "list") {
+                    return await i.update({ components: [buildList()], flags: MessageFlags.IsComponentsV2 });
+                }
 
-            if (i.values?.[0]) {
-                return i.update({ components: [buildCategory(i.values[0])], flags: MessageFlags.IsComponentsV2 });
+                if (i.values?.[0]) {
+                    return await i.update({ components: [buildCategory(i.values[0])], flags: MessageFlags.IsComponentsV2 });
+                }
+            } catch (err) {
+                console.error("[Help Menu Error]", err);
+                await i.reply({ content: "Something went wrong showing that — please try again.", ephemeral: true }).catch(() => {});
             }
         });
     },
