@@ -45,7 +45,39 @@ module.exports = (client) => {
         return dangerous;
     };
 
-    client.on("guildMemberAdd", (member) => {
+    // Who granted a role to `targetMemberId`, if anyone attributable, within
+    // the lookup window. Used to exempt the bot's own actions (recovery,
+    // forever-roles restoration, etc.) as well as the owner/whitelist.
+    const findGranter = async (guild, targetMemberId) => {
+        await sleep(AUDIT_LOOKUP_DELAY_MS);
+        try {
+            const logs = await guild.fetchAuditLogs({ type: AuditLogEvent.MemberRoleUpdate, limit: 10 });
+            console.log(`${TAG} fetched ${logs.entries.size} MemberRoleUpdate audit log entries`);
+            const entry = logs.entries.find(e =>
+                e.target?.id === targetMemberId &&
+                (Date.now() - e.createdTimestamp) < AUDIT_LOOKUP_WINDOW_MS
+            );
+            const granterId = entry?.executor?.id ?? null;
+            console.log(`${TAG} matched granter: ${granterId ?? "none found (auto-grant assumed)"}`);
+            return granterId;
+        } catch (err) {
+            console.log(`${TAG} audit log fetch failed, treating as no attributable granter:`, err?.message || err);
+            return null;
+        }
+    };
+
+    // Is this granter exempt? Owner, Beast-Mode-whitelisted, or the bot
+    // itself (e.g. antinuke recovery / forever-roles restoring a role —
+    // that's the bot doing its own legitimate job, never a violation).
+    const isExemptGranter = (guild, granterId) => {
+        if (!granterId) return false;
+        if (granterId === guild.ownerId) { console.log(`${TAG} skip — granter is owner`); return true; }
+        if (granterId === client.user.id) { console.log(`${TAG} skip — granter is this bot itself (its own recovery/restoration)`); return true; }
+        if (getWhitelist(client, guild.id).includes(granterId)) { console.log(`${TAG} skip — granter whitelisted`); return true; }
+        return false;
+    };
+
+    client.on("guildMemberAdd", async (member) => {
         try {
             const guild = member.guild;
             console.log(`${TAG} guildMemberAdd fired for ${member.id} in ${guild.id}, roles at join: [${member.roles.cache.map(r => r.id).join(", ")}]`);
@@ -59,8 +91,15 @@ module.exports = (client) => {
             if (!roleIds.length) { console.log(`${TAG} no roles at join, nothing to check`); return; }
 
             const dangerous = findDangerousAdded(guild, roleIds);
-            if (dangerous.size) stripAndPunish(member, dangerous);
-            else console.log(`${TAG} no dangerous roles found at join`);
+            if (!dangerous.size) { console.log(`${TAG} no dangerous roles found at join`); return; }
+
+            // A role present the instant someone joins is very often the
+            // bot's own systems (or another authorized/whitelisted bot)
+            // restoring something legitimately — check before punishing.
+            const granterId = await findGranter(guild, member.id);
+            if (isExemptGranter(guild, granterId)) return;
+
+            stripAndPunish(member, dangerous);
         } catch (err) {
             console.error(`${TAG} Error — join`, err);
         }
@@ -77,14 +116,13 @@ module.exports = (client) => {
             if (!cfg || !cfg.enabled) { console.log(`${TAG} skip — not enabled`); return; }
 
             // A member always has at least the @everyone role. If the old
-            // snapshot has none at all, or fewer roles than the new one by
-            // more than what actually changed, the cache we're comparing
-            // against is stale/incomplete (e.g. this update fired for an
-            // unrelated reason — nickname, timeout, boost — while the old
-            // role cache hadn't been fully populated yet). Diffing against
-            // an unreliable snapshot makes every existing role look
-            // "newly added", which is exactly what was causing random,
-            // unearned violations. Skip rather than risk a false positive.
+            // snapshot has none at all, or the role count didn't actually
+            // grow, the cache we're comparing against is stale/incomplete
+            // (e.g. this update fired for an unrelated reason — nickname,
+            // timeout, boost — while the old role cache hadn't been fully
+            // populated yet). Diffing against an unreliable snapshot makes
+            // every existing role look "newly added". Skip rather than risk
+            // a false positive.
             if (oldMember.roles.cache.size === 0) {
                 console.log(`${TAG} skip — old member role cache is empty/unreliable, cannot safely diff`);
                 return;
@@ -106,29 +144,8 @@ module.exports = (client) => {
             if (newMember.id === guild.ownerId) { console.log(`${TAG} skip — receiver is owner`); return; }
             if (getWhitelist(client, guild.id).includes(newMember.id)) { console.log(`${TAG} skip — receiver whitelisted`); return; }
 
-            // Give Discord's audit log a moment to actually record the change
-            // before we look for it — fetching immediately is a common cause
-            // of missing the entry and wrongly assuming "no attributable granter".
-            await sleep(AUDIT_LOOKUP_DELAY_MS);
-
-            let granterId = null;
-            try {
-                const logs = await guild.fetchAuditLogs({ type: AuditLogEvent.MemberRoleUpdate, limit: 10 });
-                console.log(`${TAG} fetched ${logs.entries.size} MemberRoleUpdate audit log entries`);
-                const entry = logs.entries.find(e =>
-                    e.target?.id === newMember.id &&
-                    (Date.now() - e.createdTimestamp) < AUDIT_LOOKUP_WINDOW_MS
-                );
-                granterId = entry?.executor?.id ?? null;
-                console.log(`${TAG} matched granter: ${granterId ?? "none found (auto-grant assumed)"}`);
-            } catch (err) {
-                console.log(`${TAG} audit log fetch failed, treating as no attributable granter:`, err?.message || err);
-            }
-
-            if (granterId) {
-                if (granterId === guild.ownerId) { console.log(`${TAG} skip — granter is owner`); return; }
-                if (getWhitelist(client, guild.id).includes(granterId)) { console.log(`${TAG} skip — granter whitelisted`); return; }
-            }
+            const granterId = await findGranter(guild, newMember.id);
+            if (isExemptGranter(guild, granterId)) return;
 
             stripAndPunish(newMember, dangerous);
         } catch (err) {
