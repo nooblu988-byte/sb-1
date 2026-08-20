@@ -173,6 +173,14 @@ async function renderHeatStatus(client, guild) {
 
 // ─── Trigger / lift the lockdown ──────────────────────────────────────
 async function triggerLockdown(client, guild, cfg, state) {
+    // Fetch fresh role data before scanning — if the lockdown was triggered
+    // by a role's permissions being changed just now (e.g. Administrator
+    // toggled on), the gateway's role-cache update can occasionally lag
+    // slightly behind our own sub-50ms audit-log-driven heat detection.
+    // Scanning stale cache data would silently skip stripping that exact
+    // role. A fresh fetch guarantees we see the permissions as they are now.
+    await guild.roles.fetch().catch(() => {});
+
     const botRole = guild.members.me?.roles.highest;
     const botPosition = botRole?.position ?? 0;
 
