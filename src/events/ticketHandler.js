@@ -1,6 +1,8 @@
 const {
     ContainerBuilder,
     TextDisplayBuilder,
+    SectionBuilder,
+    ThumbnailBuilder,
     SeparatorBuilder,
     ButtonBuilder,
     MediaGalleryBuilder,
@@ -33,12 +35,25 @@ const ACCENT = 0x26272F;
 const sep = () => new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small);
 const STEP_WAIT_MS = 2 * 60 * 1000;
 
-function buildPanelPayload(cfg) {
-    const c = new ContainerBuilder()
-        .setAccentColor(ACCENT)
-        .addTextDisplayComponents(new TextDisplayBuilder().setContent(`## ${cfg.title}`))
-        .addSeparatorComponents(sep())
-        .addTextDisplayComponents(new TextDisplayBuilder().setContent(cfg.description));
+function buildPanelPayload(cfg, guild) {
+    const iconURL = guild?.iconURL?.({ size: 256 });
+
+    const c = new ContainerBuilder().setAccentColor(ACCENT);
+
+    if (iconURL) {
+        c.addSectionComponents(
+            new SectionBuilder()
+                .addTextDisplayComponents(
+                    new TextDisplayBuilder().setContent(`## ${cfg.title}`),
+                    new TextDisplayBuilder().setContent(cfg.description)
+                )
+                .setThumbnailAccessory(new ThumbnailBuilder().setURL(iconURL))
+        );
+    } else {
+        c.addTextDisplayComponents(new TextDisplayBuilder().setContent(`## ${cfg.title}`))
+            .addSeparatorComponents(sep())
+            .addTextDisplayComponents(new TextDisplayBuilder().setContent(cfg.description));
+    }
 
     if (cfg.bannerURL) {
         c.addSeparatorComponents(sep());
@@ -144,17 +159,17 @@ module.exports = (client) => {
                     const file = new AttachmentBuilder(buffer, { name: state.bannerFilename });
 
                     cfgBase.bannerURL = `attachment://${state.bannerFilename}`;
-                    const payload = buildPanelPayload(cfgBase);
+                    const payload = buildPanelPayload(cfgBase, message.guild);
                     sent = await channel.send({ files: [file], ...payload });
 
                     const durableURL = sent.attachments.first()?.url;
                     if (durableURL) cfgBase.bannerURL = durableURL;
                 } catch {
                     cfgBase.bannerURL = null;
-                    sent = await channel.send(buildPanelPayload(cfgBase));
+                    sent = await channel.send(buildPanelPayload(cfgBase, message.guild));
                 }
             } else {
-                sent = await channel.send(buildPanelPayload(cfgBase));
+                sent = await channel.send(buildPanelPayload(cfgBase, message.guild));
             }
 
             saveConfig(client, message.guild.id, { ...cfgBase, panelChannelId: channel.id, panelMessageId: sent.id });
