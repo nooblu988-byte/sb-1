@@ -43,17 +43,15 @@ function buildPanelPayload(cfg, guild) {
     if (iconURL) {
         c.addSectionComponents(
             new SectionBuilder()
-                .addTextDisplayComponents(
-                    new TextDisplayBuilder().setContent(`## ${cfg.title}`),
-                    new TextDisplayBuilder().setContent(cfg.description)
-                )
+                .addTextDisplayComponents(new TextDisplayBuilder().setContent(`## ${cfg.title}`))
                 .setThumbnailAccessory(new ThumbnailBuilder().setURL(iconURL))
         );
     } else {
-        c.addTextDisplayComponents(new TextDisplayBuilder().setContent(`## ${cfg.title}`))
-            .addSeparatorComponents(sep())
-            .addTextDisplayComponents(new TextDisplayBuilder().setContent(cfg.description));
+        c.addTextDisplayComponents(new TextDisplayBuilder().setContent(`## ${cfg.title}`));
     }
+
+    c.addSeparatorComponents(sep())
+        .addTextDisplayComponents(new TextDisplayBuilder().setContent(cfg.description));
 
     if (cfg.bannerURL) {
         c.addSeparatorComponents(sep());
