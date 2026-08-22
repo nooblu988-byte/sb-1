@@ -40,21 +40,20 @@ function buildPanelPayload(cfg, guild) {
 
     const c = new ContainerBuilder().setAccentColor(ACCENT);
 
+    c.addTextDisplayComponents(new TextDisplayBuilder().setContent(`## ${cfg.title}`))
+        .addSeparatorComponents(sep());
+
     if (iconURL) {
         c.addSectionComponents(
             new SectionBuilder()
-                .addTextDisplayComponents(new TextDisplayBuilder().setContent(`## ${cfg.title}`))
+                .addTextDisplayComponents(new TextDisplayBuilder().setContent(cfg.description))
                 .setThumbnailAccessory(new ThumbnailBuilder().setURL(iconURL))
         );
     } else {
-        c.addTextDisplayComponents(new TextDisplayBuilder().setContent(`## ${cfg.title}`));
+        c.addTextDisplayComponents(new TextDisplayBuilder().setContent(cfg.description));
     }
 
-    c.addSeparatorComponents(sep())
-        .addTextDisplayComponents(new TextDisplayBuilder().setContent(cfg.description));
-
     if (cfg.bannerURL) {
-        c.addSeparatorComponents(sep());
         c.addMediaGalleryComponents(
             new MediaGalleryBuilder().addItems(new MediaGalleryItemBuilder().setURL(cfg.bannerURL))
         );
