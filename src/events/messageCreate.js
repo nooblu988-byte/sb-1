@@ -42,7 +42,8 @@ module.exports = async (client) => {
     ])) return;
 
     // ═══════════════════════════════════════════════════════════════
-    // 😀 AUTOREACT SYSTEM (NEW — runs on any message with mentions)
+    // 😀 AUTOREACT SYSTEM (runs only on an explicitly typed @mention —
+    // NOT on a plain reply, which Discord also counts as a "mention")
     // ═══════════════════════════════════════════════════════════════
     try {
       const autoreactKey = `autoreact_${message.guild.id}`;
@@ -53,7 +54,9 @@ module.exports = async (client) => {
 
         if (canReact) {
           for (const [userId, emoji] of Object.entries(autoreactData)) {
-            if (message.mentions.users.has(userId)) {
+            const explicitlyTagged =
+              message.content.includes(`<@${userId}>`) || message.content.includes(`<@!${userId}>`);
+            if (explicitlyTagged) {
               await message.react(emoji).catch(() => {});
             }
           }
