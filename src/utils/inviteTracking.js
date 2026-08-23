@@ -1,5 +1,114 @@
-const {
+// ─── Config (which channels to post to) ───────────────────────────────
+function getConfig(client, guildId) {
+    return client.lmdbGet(`invitetrack_cfg_${guildId}`) || null;
+}
+function saveConfig(client, guildId, cfg) {
+    return client.lmdbSet(`invitetrack_cfg_${guildId}`, cfg);
+}
+
+// ─── Permanent record of how each member joined (for the leave mirror) ─
+function getJoinInfo(client, guildId, userId) {
+    return client.lmdbGet(`invitetrack_join_${guildId}_${userId}`) || null;
+}
+function saveJoinInfo(client, guildId, userId, info) {
+    return client.lmdbSet(`invitetrack_join_${guildId}_${userId}`, info);
+}
+function clearJoinInfo(client, guildId, userId) {
+    return client.lmdbDel(`invitetrack_join_${guildId}_${userId}`);
+}
+
+// ─── Live invite-use cache (in-memory — rebuilt on ready per guild) ───
+function ensureCacheMaps(client) {
+    if (!client._inviteUseCache) client._inviteUseCache = new Map(); // guildId -> Map(code -> uses)
+    if (!client._vanityUseCache) client._vanityUseCache = new Map(); // guildId -> uses
+}
+
+async function primeGuildCache(client, guild) {
+    ensureCacheMaps(client);
+    try {
+        const invites = await guild.invites.fetch();
+        const map = new Map();
+        for (const [code, invite] of invites) map.set(code, invite.uses ?? 0);
+        client._inviteUseCache.set(guild.id, map);
+    } catch (err) {
+        console.error(`[Invite Tracking] Failed to prime invite cache for ${guild.id}:`, err?.message || err);
+    }
+
+    if (guild.vanityURLCode) {
+        try {
+            const vanity = await guild.fetchVanityData();
+            client._vanityUseCache.set(guild.id, vanity?.uses ?? 0);
+        } catch (err) {
+            console.error(`[Invite Tracking] Failed to prime vanity cache for ${guild.id}:`, err?.message || err);
+        }
+    }
+}
+
+// Figures out which invite (or the vanity link) a member just used by
+// diffing current use-counts against the cached snapshot, then updates
+// the cache for next time. Returns one of:
+//   { type: "vanity" }
+//   { type: "invite", inviterId, code }
+//   { type: "unknown" }
+async function resolveJoin(client, guild) {
+    ensureCacheMaps(client);
+
+    const before = client._inviteUseCache.get(guild.id) || new Map();
+    let after;
+    try {
+        after = await guild.invites.fetch();
+    } catch (err) {
+        console.error(`[Invite Tracking] Failed to fetch invites for ${guild.id}:`, err?.message || err);
+        return { type: "unknown" };
+    }
+
+    const newMap = new Map();
+    let used = null;
+
+    for (const [code, invite] of after) {
+        const uses = invite.uses ?? 0;
+        newMap.set(code, uses);
+        const prevUses = before.get(code) ?? 0;
+        if (uses > prevUses) used = invite;
+    }
+
+    client._inviteUseCache.set(guild.id, newMap);
+
+    if (used) {
+        return { type: "invite", inviterId: used.inviter?.id || null, code: used.code };
+    }
+
+    if (guild.vanityURLCode) {
+        try {
+            const vanity = await guild.fetchVanityData();
+            const prevVanityUses = client._vanityUseCache.get(guild.id) ?? 0;
+            const nowVanityUses = vanity?.uses ?? 0;
+            client._vanityUseCache.set(guild.id, nowVanityUses);
+            if (nowVanityUses > prevVanityUses) return { type: "vanity" };
+        } catch (err) {
+            console.error(`[Invite Tracking] Failed to fetch vanity data for ${guild.id}:`, err?.message || err);
+        }
+    }
+
+    return { type: "unknown" };
+}
+
+function bumpCacheOnInviteCreate(client, guild, invite) {
+    ensureCacheMaps(client);
+    const map = client._inviteUseCache.get(guild.id) || new Map();
+    map.set(invite.code, invite.uses ?? 0);
+    client._inviteUseCache.set(guild.id, map);
+}
+
+function dropCacheOnInviteDelete(client, guild, invite) {
+    ensureCacheMaps(client);
+    const map = client._inviteUseCache.get(guild.id);
+    if (map) map.delete(invite.code);
+}
+
+module.exports = {
     getConfig,
+    saveConfig,
     getJoinInfo,
     saveJoinInfo,
     clearJoinInfo,
@@ -7,84 +116,4 @@ const {
     resolveJoin,
     bumpCacheOnInviteCreate,
     dropCacheOnInviteDelete,
-} = require("../utils/inviteTracking");
-
-// The account's main profile display name (what shows on their profile),
-// not the unique @username handle — falls back to username if unset.
-const profileName = (user) => user.globalName || user.username;
-
-module.exports = (client) => {
-    client.once("clientReady", async () => {
-        for (const [, guild] of client.guilds.cache) {
-            await primeGuildCache(client, guild).catch(() => {});
-        }
-    });
-
-    client.on("guildCreate", (guild) => {
-        primeGuildCache(client, guild).catch(() => {});
-    });
-
-    client.on("inviteCreate", (invite) => {
-        if (invite.guild) bumpCacheOnInviteCreate(client, invite.guild, invite);
-    });
-
-    client.on("inviteDelete", (invite) => {
-        if (invite.guild) dropCacheOnInviteDelete(client, invite.guild, invite);
-    });
-
-    client.on("guildMemberAdd", async (member) => {
-        try {
-            const guild = member.guild;
-            const cfg = getConfig(client, guild.id);
-            if (!cfg) return;
-
-            const result = await resolveJoin(client, guild);
-            const name = profileName(member.user);
-
-            let content;
-            if (result.type === "vanity") {
-                content = `${name} joined using a vanity invite.`;
-            } else if (result.type === "invite" && result.inviterId) {
-                content = `${name} joined, invited by <@${result.inviterId}>.`;
-            } else {
-                content = `${name} joined. I can not figure out how they joined.`;
-            }
-
-            saveJoinInfo(client, guild.id, member.id, result);
-
-            const channel = guild.channels.cache.get(cfg.joinChannelId);
-            if (channel) channel.send({ content }).catch(() => {});
-        } catch (err) {
-            console.error("[Invite Tracking] guildMemberAdd error:", err);
-        }
-    });
-
-    client.on("guildMemberRemove", async (member) => {
-        try {
-            const guild = member.guild;
-            const cfg = getConfig(client, guild.id);
-            if (!cfg) return;
-
-            const info = getJoinInfo(client, guild.id, member.id);
-            const name = profileName(member.user);
-
-            let content;
-            if (!info || info.type === "unknown") {
-                content = `${name} left the server. I can not figure out how they joined.`;
-            } else if (info.type === "vanity") {
-                content = `${name} left the server. They joined using the vanity invite.`;
-            } else if (info.type === "invite" && info.inviterId) {
-                content = `${name} left the server, they were invited by <@${info.inviterId}>.`;
-            } else {
-                content = `${name} left the server. I can not figure out how they joined.`;
-            }
-
-            clearJoinInfo(client, guild.id, member.id);
-
-            const channel = guild.channels.cache.get(cfg.leaveChannelId);
-            if (channel) channel.send({ content }).catch(() => {});
-        } catch (err) {
-            console.error("[Invite Tracking] guildMemberRemove error:", err);
-        }
-    });
 };
