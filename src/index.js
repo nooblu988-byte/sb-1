@@ -54,6 +54,7 @@ const client = new Client({
  GatewayIntentBits.GuildModeration,
  GatewayIntentBits.GuildVoiceStates,
  GatewayIntentBits.GuildMessageReactions, // required for the voting feature's vote-reaction tracking
+ GatewayIntentBits.GuildInvites, // required for the invite-tracking feature
  ],
  partials: [
  Partials.Channel,
