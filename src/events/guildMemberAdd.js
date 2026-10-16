@@ -242,6 +242,39 @@ module.exports = (client) => {
     }
 
     // ═══════════════════════════════════════════════════════════════
+    // 🎉 WELCOME MULTI SYSTEM (multiple channels — separate config)
+    // ═══════════════════════════════════════════════════════════════
+    try {
+      const multiCfg = client.lmdbGet(`welcomemulti_cfg_${guild.id}`);
+      if (
+        multiCfg &&
+        Array.isArray(multiCfg.channelIds) &&
+        multiCfg.channelIds.length &&
+        multiCfg.enabled !== false
+      ) {
+        for (const channelId of multiCfg.channelIds) {
+          const multiChannel = guild.channels.cache.get(channelId);
+          if (!multiChannel) {
+            console.error(
+              `[WelcomeMulti] Channel ${channelId} not found in ${guild.name}`
+            );
+            continue;
+          }
+          try {
+            await sendWelcomeEmbed(member, multiChannel, multiCfg);
+            console.log(
+              `[WelcomeMulti] Welcome sent for ${member.user.tag} in ${guild.name} (#${multiChannel.name})`
+            );
+          } catch (err) {
+            console.error("[WelcomeMulti Error]", err.message);
+          }
+        }
+      }
+    } catch (err) {
+      console.error("[WelcomeMulti Error]", err.message);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
     // 📜 OLD GREET SYSTEM (only if new welcome did NOT run)
     // ═══════════════════════════════════════════════════════════════
     if (welcomeSent) {
