@@ -56,14 +56,8 @@ module.exports = {
             return message.channel.send(errorContainer(`${client.emoji.error} | **${user.username}** cannot be timed out — they hold the **Administrator** permission.`));
         }
 
-        if (message.author.id !== message.guild.ownerId) {
-            if (member.id === message.guild.ownerId) {
-                return message.channel.send(errorContainer("${client.emoji.error} | You cannot timeout the server owner."));
-            }
-
-            if (message.member.roles.highest.position <= member.roles.highest.position) {
-                return message.channel.send(errorContainer(`${client.emoji.error} | You cannot timeout **${user.username}** — their highest role is equal to or above yours.`));
-            }
+        if (member.id === message.guild.ownerId) {
+            return message.channel.send(errorContainer("${client.emoji.error} | You cannot timeout the server owner."));
         }
 
         if (!member.moderatable) {
