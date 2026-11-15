@@ -56,6 +56,16 @@ module.exports = {
             return message.channel.send(errorContainer(`${client.emoji.error} | **${user.username}** cannot be timed out — they hold the **Administrator** permission.`));
         }
 
+        // Two members who both hold the timeout permission cannot timeout each other.
+        // The server owner and Administrators are exempt as the one giving the timeout.
+        if (
+            member.permissions.has(PermissionFlagsBits.ModerateMembers) &&
+            message.author.id !== message.guild.ownerId &&
+            !message.member.permissions.has(PermissionFlagsBits.Administrator)
+        ) {
+            return message.channel.send(errorContainer(`${client.emoji.error} | **${user.username}** cannot be timed out — they also have the **\`MODERATE_MEMBERS\`** permission.`));
+        }
+
         if (member.id === message.guild.ownerId) {
             return message.channel.send(errorContainer("${client.emoji.error} | You cannot timeout the server owner."));
         }
