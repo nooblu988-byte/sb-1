@@ -184,39 +184,41 @@ async function triggerLockdown(client, guild, cfg, state) {
     const botRole = guild.members.me?.roles.highest;
     const botPosition = botRole?.position ?? 0;
 
-    // Roles held by Beast-Mode-whitelisted users/bots are left alone —
-    // whitelist protection extends to their roles during lockdown too.
-    const whitelist = getWhitelist(client, guild.id);
-    const protectedRoleIds = new Set();
-    for (const userId of whitelist) {
-        const member = guild.members.cache.get(userId);
-        if (member) for (const role of member.roles.cache.values()) protectedRoleIds.add(role.id);
-    }
-
     const snapshot = [];
-    const edits = [];
+    const edits = [];          // normal (human) roles — stripped first, all in parallel
+    const botRoleEdits = [];   // roles the bot itself wears — stripped last
+
+    // Roles the bot itself wears (e.g. the Forever security roles) are where
+    // the bot's own permissions can come from. Stripping them in the same
+    // parallel burst as everything else can leave the bot without the
+    // permission bits it needs to edit the remaining roles, so those edits
+    // fail silently. They are still stripped — just after the other roles.
+    const botWornRoleIds = new Set(guild.members.me?.roles.cache.keys() ?? []);
 
     for (const [, role] of guild.roles.cache) {
         if (botRole && role.position >= botPosition) continue; // Discord would reject these anyway — also protects the bot's own role
-        if (protectedRoleIds.has(role.id)) continue;
         const bits = role.permissions.bitfield & DANGEROUS;
         if (bits === 0n) continue;
 
         snapshot.push({ roleId: role.id, removed: bits.toString() });
-        edits.push(
-            role.setPermissions(
-                role.permissions.bitfield & ~DANGEROUS,
-                "Beast Mode: Heat threshold reached — lockdown"
-            ).catch(_noop)
-        );
+        const strip = () => role.setPermissions(
+            role.permissions.bitfield & ~DANGEROUS,
+            "Beast Mode: Heat threshold reached — lockdown"
+        ).catch(err => console.warn(`[Beast Mode] Could not strip "${role.name}" (${role.id}) in ${guild.id}:`, err?.message || err));
+
+        if (botWornRoleIds.has(role.id)) botRoleEdits.push(strip);
+        else edits.push(strip);
     }
 
-    // Fire every role edit in parallel — don't wait on one before starting
-    // the next. State is saved immediately so the lockdown is recorded
-    // even while the permission edits are still landing.
+    // Normal roles fire all at once (parallel), then the roles the bot itself
+    // wears. State is saved immediately so the lockdown is recorded even
+    // while the permission edits are still landing.
     state.lockdown = { since: Date.now(), snapshot };
     saveState(client, guild.id, state);
-    Promise.allSettled(edits).catch(_noop);
+    (async () => {
+        await Promise.allSettled(edits.map(run => run()));
+        await Promise.allSettled(botRoleEdits.map(run => run()));
+    })().catch(_noop);
 
     await logHeat(
         client, guild, cfg.logChannelId,
