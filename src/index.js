@@ -209,7 +209,7 @@ client.once("clientReady", () => {
  // 🎮 NOOBLU SECURITY BOT STATUS — KING STYLE 👑
  // ═══════════════════════════════════════════════════════════════
  client.user.setActivity(`👑 LUCY QUEEN`, { type: 3 });
- client.user.setStatus('Do Not Disturb');
+ client.user.setStatus('Online');
 });
 
 const token = process.env.DISCORD_TOKEN || config.token;
