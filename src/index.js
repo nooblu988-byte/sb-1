@@ -208,8 +208,8 @@ client.once("clientReady", () => {
  // ═══════════════════════════════════════════════════════════════
  // 🎮 NOOBLU SECURITY BOT STATUS — KING STYLE 👑
  // ═══════════════════════════════════════════════════════════════
- client.user.setActivity(`👑 NOOBLU SECURITY`, { type: 3 });
- client.user.setStatus('online');
+ client.user.setActivity(`👑 LUCY QUEEN`, { type: 3 });
+ client.user.setStatus('Do Not Disturb');
 });
 
 const token = process.env.DISCORD_TOKEN || config.token;
