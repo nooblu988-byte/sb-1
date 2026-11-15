@@ -54,12 +54,6 @@ module.exports = {
             return message.channel.send(errorContainer(`${client.emoji.error} | **${user.username}** is not currently timed out.`));
         }
 
-        if (message.author.id !== message.guild.ownerId) {
-            if (message.member.roles.highest.position <= member.roles.highest.position) {
-                return message.channel.send(errorContainer(`${client.emoji.error} | You cannot unmute **${user.username}** — their highest role is equal to or above yours.`));
-            }
-        }
-
         if (!member.moderatable) {
             return message.channel.send(errorContainer("${client.emoji.error} | I am unable to unmute this member. Their highest role is equal to or above mine."));
         }
